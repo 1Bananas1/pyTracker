@@ -31,7 +31,7 @@ class SetupWizard(tk.Tk):
         self.geometry(f'+{x}+{y}')
         
         # Add an icon (replace with your own .ico file)
-        # self.iconbitmap("icon.ico")
+        #self.iconbitmap("icon.ico")
         
         self.config_data = {}
         
@@ -141,7 +141,7 @@ class SetupWizard(tk.Tk):
         self.status_label = ttk.Label(
             self, 
             textvariable=self.status_var,
-            foreground="gray"
+            foreground="gray" 
         )
         self.status_label.pack(side="bottom", pady=10)
         
@@ -215,7 +215,7 @@ class SetupWizard(tk.Tk):
         try:
             with open(CONFIG_FILE, "w") as f:
                 json.dump(self.config_data, f)
-            messagebox.showinfo("Success", "Configuration saved successfully!")
+            messagebox.showinfo("Success", "Configuration saved successfully! Please download your credentials file.")
             self.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save configuration: {str(e)}")
