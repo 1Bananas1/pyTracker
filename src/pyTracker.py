@@ -1,5 +1,6 @@
 import os, json
 import ollama
+import re
 
 
 # with open('config/email_config.json', 'r') as f:
@@ -45,4 +46,21 @@ EMAIL:
 ])
 print(response['message']['content'])
 
+response_message = response['message']['content']
 
+
+match = re.search(r"```(.*?)```", response_message, re.DOTALL)
+if match:
+    json_str = match.group(1).strip()  # Extract JSON string inside code block
+    try:
+        data = json.loads(json_str)  # Convert to dictionary
+        print(data)  # Now it's a proper Python dictionary
+    except json.JSONDecodeError as e:
+        print("Error decoding JSON:", e)
+else:
+    print("No JSON found in the response.")
+
+# Save to a JSON file
+if match:
+    with open("output.json", "w") as f:
+        json.dump(data, f, indent=4)
