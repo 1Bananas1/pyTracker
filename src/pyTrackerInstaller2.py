@@ -1,16 +1,21 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 import os
 import json
 import sys
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+import gspread
 
 CONFIG_DIR = "config"
 CONFIG_FILE = os.path.join(CONFIG_DIR, "email_config.json")
 THEME_COLOR = "#3498db"  # A nice blue color
 BG_COLOR = "#f5f5f5"     # Light gray background
 BTN_COLOR = "#2980b9"    # Darker blue for buttons
-
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
 class SetupWizard(tk.Tk):
     def __init__(self):
@@ -21,6 +26,9 @@ class SetupWizard(tk.Tk):
         self.resizable(False, False)
         icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../public/icon.ico"))
         self.iconbitmap(icon_path)
+
+        # Initialize config_data
+        self.config_data = {}
 
         # Custom font
         self.custom_font = Font(family="Helvetica", size=12)
@@ -132,7 +140,7 @@ class SetupWizard(tk.Tk):
             with open(CONFIG_FILE, "w") as f:
                 json.dump(self.config_data, f)
             messagebox.showinfo("Success", "Configuration saved successfully! Please download your credentials file.")
-            self.destroy()
+            self.sheetSetup()  # Call sheetSetup after saving the configuration
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save configuration: {str(e)}")
             self.status_var.set("Error saving configuration")
@@ -277,6 +285,55 @@ class SetupWizard(tk.Tk):
         )
         self.status_label.pack(side="bottom", pady=10)
 
+    def sheetSetup(self):
+        self.title('pyTracker Sheet Setup')
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        self.header_frame = tk.Frame(self, bg=THEME_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Arial", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Setup", 
+            font=header_font, 
+            bg=THEME_COLOR, 
+            fg="white"
+        ).pack(pady=20)
+
+        setupSheet = messagebox.askokcancel("pyTracker Setup", "Would you like to setup your Google Sheet now?")
+        if not setupSheet:
+            self.destroy()
+            return
+        
+        if not os.path.exists(CONFIG_FILE):
+            messagebox.showerror("Error", "No configuration file found!")
+            self.destroy()
+            return
+        
+        if not os.path.exists(os.path.join(CONFIG_DIR, "credentials.json")):
+            messagebox.showerror("Error", "No credentials file found!")
+            self.destroy()
+            return
+        
+        print("Starting Google Sheet setup...")
+
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+            
+        SPREADSHEET_ID = config['sheetID']
+        creds = get_credentials()
+        service = build('sheets', 'v4', credentials=creds)
+        gc = gspread.authorize(creds)
+        was_initialized = initialize_sheets(service, SPREADSHEET_ID, gc)
+        if was_initialized:
+            print("First-time setup completed successfully.")
+        else:
+            print("Using existing sheet structure.")
+        
+        
 
 def loadConfig():
     app = SetupWizard()
@@ -297,6 +354,102 @@ def loadConfig():
     # Run the application
     app.mainloop()
 
+
+def get_credentials():
+    with open(CONFIG_FILE, 'r') as f:
+        config = json.load(f)
+
+    OUTPUT_DIR = config['output_dir']
+    creds = None
+    # The file token.json stores the user's access and refresh tokens
+    token_path = os.path.join(CONFIG_DIR, 'token.json')
+    
+    # Check if token.json exists with valid credentials
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_info(
+            json.load(open(token_path)), SCOPES)
+    
+    # If there are no valid credentials, let the user log in
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                os.path.join(CONFIG_DIR, 'credentials.json'), SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Save the credentials for the next run
+        with open(token_path, 'w') as token:
+            token.write(creds.to_json())
+    
+    return creds
+
+def check_if_initialized(gc_client, spreadsheet_id):
+    """Check if this spreadsheet has already been set up with our custom sheets."""
+    spreadsheet = gc_client.open_by_key(spreadsheet_id)
+    worksheet_titles = [ws.title for ws in spreadsheet.worksheets()]
+    
+    # If both Applications and Backend sheets exist, consider it initialized
+    return 'Applications' in worksheet_titles and 'Backend' in worksheet_titles
+
+def initialize_sheets(service, spreadsheet_id, gc_client):
+    """Set up the spreadsheet with Applications and Backend sheets."""
+    is_initialized = check_if_initialized(gc_client, spreadsheet_id)
+    
+    if is_initialized:
+        print("Spreadsheet already initialized with required sheets.")
+        return False
+    
+    print("Initializing spreadsheet with required sheets...")
+    spreadsheet = gc_client.open_by_key(spreadsheet_id)
+    
+    # Step 1: Create new sheets first
+    # Create Applications sheet if it doesn't exist
+    if 'Applications' not in [ws.title for ws in spreadsheet.worksheets()]:
+        spreadsheet.add_worksheet(title='Applications', rows=1000, cols=20)
+        print("Created 'Applications' sheet")
+    
+    # Create Backend sheet if it doesn't exist
+    if 'Backend' not in [ws.title for ws in spreadsheet.worksheets()]:
+        spreadsheet.add_worksheet(title='Backend', rows=1000, cols=20)
+        print("Created 'Backend' sheet")
+    
+    # Step 2: Set up headers in Applications sheet if needed
+    applications_sheet = spreadsheet.worksheet('Applications')
+    if not applications_sheet.cell(1, 1).value:
+        applications_sheet.update('A1:D1', [['Company', 'Position', 'Status', 'Date Applied']])
+        print("Initialized headers in Applications sheet")
+    
+    # Step 3: Now that we have our custom sheets, remove default sheets
+    remove_default_sheets(service, spreadsheet_id, gc_client)
+    
+    return True
+
+def remove_default_sheets(service, spreadsheet_id, gc_client):
+    """Remove default sheets like Sheet1, Sheet2, etc. after ensuring we have custom sheets."""
+    # Open the spreadsheet using gspread
+    spreadsheet = gc_client.open_by_key(spreadsheet_id)
+    
+    # Get all worksheets
+    worksheets = spreadsheet.worksheets()
+    
+    # Default sheet names to remove
+    default_names = ["Sheet1", "Sheet2", "Sheet3"]
+    
+    # Track if we've removed sheets 
+    sheets_removed = False
+    
+    # Remove default sheets - now safe to do since we've created our custom sheets
+    for worksheet in worksheets:
+        if worksheet.title in default_names:
+            try:
+                print(f"Deleting default worksheet: {worksheet.title}")
+                spreadsheet.del_worksheet(worksheet)
+                sheets_removed = True
+            except Exception as e:
+                print(f"Could not delete {worksheet.title}: {e}")
+    
+    return sheets_removed
 
 def main():
     config = loadConfig()
