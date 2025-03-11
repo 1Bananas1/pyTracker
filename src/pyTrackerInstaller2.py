@@ -417,8 +417,19 @@ def initialize_sheets(service, spreadsheet_id, gc_client):
     # Step 2: Set up headers in Applications sheet if needed
     applications_sheet = spreadsheet.worksheet('Applications')
     if not applications_sheet.cell(1, 1).value:
-        applications_sheet.update('A1:D1', [['Company', 'Position', 'Status', 'Date Applied']])
+        applications_sheet.update('A1:F1', [['Status', 'Company', 'Date Applied', 'Last Updated','Link','Role']])
+        applications_sheet.freeze(rows=1)
+        applications_sheet.format('A1:F1', {'textFormat': {'bold': True}})
+        applications_sheet.format('A1:F1', {"backgroundColor": {"red": 0.961, "green": 0.961, "blue": 0.961}})
         print("Initialized headers in Applications sheet")
+
+    backend_sheet = spreadsheet.worksheet('Backend')
+    if not backend_sheet.cell(1, 1).value:
+        backend_sheet.update('A1:C1', [['Company', 'Company ID', 'Role']])
+        backend_sheet.freeze(rows=1)
+        backend_sheet.format('A1:C1', {'textFormat': {'bold': True}})
+        backend_sheet.format('A1:C1', {"backgroundColor": {"red": 0.961, "green": 0.961, "blue": 0.961}})
+        print("Initialized headers in Backend sheet")
     
     # Step 3: Now that we have our custom sheets, remove default sheets
     remove_default_sheets(service, spreadsheet_id, gc_client)
