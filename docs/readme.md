@@ -34,7 +34,9 @@ Make a Google [App Key](https://myaccount.google.com/u/1/apppasswords) to use du
 ```
 
 ## Installer
-Make a new google sheet, and take the ID found with `https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit#gid=0
+Make a new google sheet, and take the ID found with `https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit#gid=0`
 
 Enter the required details, and press set up google sheet
+
+Download Ollama
     
