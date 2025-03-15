@@ -1,4 +1,4 @@
-import email, ollama, json, os, base64, re, gspread, pandas as pd, difflib
+import email, ollama, json, os, base64, re, gspread, pandas as pd, difflib, logging
 from email.header import decode_header
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -243,6 +243,7 @@ def getJSON(response_message):
     
     print("Could not extract data from response:")
     print(response_message)
+    logging.info(json.dumps(response_message, indent=4))
     return None
 
 
@@ -285,6 +286,8 @@ def main():
     APP_KEY = _CONFIG['appKey']
     SHEET_ID = _CONFIG['sheetID']
     creds = get_credentials()
+    logging.basicConfig(filename='output.log', level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
     gmail_service = build('gmail', 'v1', credentials=creds)
 
@@ -294,13 +297,14 @@ def main():
 
     gc = gspread.authorize(creds)
     spreadsheet = gc.open_by_key(SHEET_ID)
-    sh = spreadsheet.sheet1
+    sh = spreadsheet.worksheet("Applications")
 
     df = saveSheet(sh)
     
     # Get the label ID for 'processed' to mark emails after processing
     processed_label_id = get_label_id(gmail_service, 'processed')
     emails_to_label = []  # To keep track of emails we've processed
+    faulty_emails = []  # To keep track of faulty emails
     
     for email in emails:
         entry = {'Status':'','Company':'','Date Applied':'','Last Applied':'','Link':'','Role':'','Last Updated':''}
@@ -309,8 +313,8 @@ def main():
         
         if current is None:
             print(f"Failed to extract JSON from response for email with subject: {email.get('subject', 'Unknown subject')}")
-            # Consider still marking this email as processed to avoid infinite retries
-            emails_to_label.append(email['id'])
+            logging.info(json.dumps(str(email) + ollamaResponse, indent=4))
+            faulty_emails.append(email['id'])
             continue  # Skip to the next email
         
         # Only proceed if we have a valid response
@@ -337,8 +341,7 @@ def main():
         except KeyError as e:
             print(f"Missing key in extracted data: {e} for email with subject: {email.get('subject', 'Unknown subject')}")
             print(f"Extracted data: {current}")
-            # Consider still marking this email as processed
-            emails_to_label.append(email['id'])
+            faulty_emails.append(email['id'])
         except Exception as e:
             print(f"Unexpected error processing email: {e}")
             # May want to not mark as processed so it can be retried
