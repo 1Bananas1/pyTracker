@@ -2,3 +2,6 @@
 config/*
 !config/.gitignore
 token.json
+src/pyTracker2.py
+src/email_monitor.py
+src/pyTrackerInstaller3.py
