@@ -5,17 +5,22 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import os
 import json
-import sys
+import sys, time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-import gspread
+import gspread,pyglet
 
 CONFIG_DIR = "config"
 CONFIG_FILE = os.path.join(CONFIG_DIR, "email_config.json")
-THEME_COLOR = "#3498db"  # A nice blue color
-BG_COLOR = "#f5f5f5"     # Light gray background
-BTN_COLOR = "#2980b9"    # Darker blue for buttons
+
+BG_COLOR = '#010104'     # Light gray background
+PRIMARY_COLOR = "#386c54"  # Dark green for primary elements
+ACCENT_COLOR = "#4A90E2"  # Accent color for highlights
+SECONDARY_COLOR = "#217346"  # Secondary color for less important elements
+TEXT_COLOR = "#ebe9fc"  # Text color for readability
+
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+
 
 class SetupWizard(tk.Tk):
     def __init__(self):
@@ -24,14 +29,14 @@ class SetupWizard(tk.Tk):
         self.geometry("600x450")
         self.configure(bg=BG_COLOR)
         self.resizable(False, False)
-        icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../public/icon.ico"))
+        icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../public/icons/icon.ico"))
         self.iconbitmap(icon_path)
 
         # Initialize config_data
         self.config_data = {}
 
         # Custom font
-        self.custom_font = Font(family="Helvetica", size=12)
+        self.custom_font = Font(family="Inter Regular", size=12)
 
         # Create and configure widgets
         width = self.winfo_width()
@@ -40,24 +45,65 @@ class SetupWizard(tk.Tk):
         y = (self.winfo_screenheight() // 2) - (height // 2)
         self.geometry(f'+{x}+{y}')
 
+        # Configure styles
+        self.configure_styles()
+
         if os.path.exists(CONFIG_FILE):
             self.load_main_screen()
         else:
             self.load_setup_screen()
 
+    def configure_styles(self):
+        """Configure styles for ttk widgets"""
+        button_style = ttk.Style()
+        button_style.configure("TButton", font=("Inter Regular", 10), background=ACCENT_COLOR, foreground=TEXT_COLOR)
+        button_style.map("TButton", background=[('active', SECONDARY_COLOR)])
+        
+        # Configure Primary.TButton style
+        button_style.configure("Primary.TButton", background=ACCENT_COLOR)
+        button_style.map("Primary.TButton", background=[('active', SECONDARY_COLOR)])
+        
+        # Configure entry style with correct background
+        entry_style = ttk.Style()
+        entry_style.configure("TEntry", 
+                            borderwidth=0, 
+                            relief="flat", 
+                            fieldbackground=BG_COLOR,  # This sets the actual text area background
+                            background=BG_COLOR,
+                            foreground=TEXT_COLOR)
+        
+        # You may also need to map the background color for different states
+        entry_style.map("TEntry",
+                    fieldbackground=[('readonly', BG_COLOR), ('disabled', BG_COLOR)],
+                    background=[('readonly', BG_COLOR), ('disabled', BG_COLOR)])
+
     def create_input_field(self, label_text, entry_name, show=None, default_value=""):
         """Helper method to create standardized input fields"""
-        frame = ttk.Frame(self.main_frame)
-        frame.pack(fill="x", pady=10)
+        frame = tk.Frame(self.main_frame, bg=BG_COLOR)  # Use tk.Frame with bg color
+        frame.pack(fill="x", pady=2)
         
-        ttk.Label(
+        # Use tk.Label instead of ttk.Label for better styling control
+        tk.Label(
             frame, 
             text=label_text, 
             width=15, 
+            bg=SECONDARY_COLOR,  # Use bg instead of background for tk widgets
+            fg=TEXT_COLOR,       # Use fg instead of foreground for tk widgets
             anchor="w"
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 0))  # Remove extra padding
         
-        entry = ttk.Entry(frame, show=show)
+        # Replace ttk.Entry with tk.Entry
+        entry = tk.Entry(
+            frame,
+            show=show,
+            background=BG_COLOR,  # Direct background setting
+            foreground=TEXT_COLOR,  # Direct text color
+            insertbackground=TEXT_COLOR,  # Cursor color
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=SECONDARY_COLOR,
+            highlightcolor=ACCENT_COLOR
+        )
         entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
         
         # Set default value if provided
@@ -69,24 +115,47 @@ class SetupWizard(tk.Tk):
 
     def create_directory_field(self, label_text, entry_name, default_value=""):
         """Helper method to create a directory input field with a browse button"""
-        frame = ttk.Frame(self.main_frame)
-        frame.pack(fill="x", pady=10)
+        frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        frame.pack(fill="x", pady=2)
         
-        ttk.Label(
+        # Use tk.Label with bg parameter
+        tk.Label(
             frame, 
             text=label_text, 
             width=15, 
+            bg=SECONDARY_COLOR,
+            fg=TEXT_COLOR,
             anchor="w"
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 0))
         
-        entry = ttk.Entry(frame)
+        entry = tk.Entry(
+            frame,
+            background=BG_COLOR,
+            foreground=TEXT_COLOR,
+            insertbackground=TEXT_COLOR,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=SECONDARY_COLOR,
+            highlightcolor=ACCENT_COLOR
+        )
         entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
         
         # Set default value if provided
         if default_value:
             entry.insert(0, default_value)
         
-        browse_button = ttk.Button(frame, text="Browse...", command=lambda: self.browse_directory(entry))
+        # Switch to tk.Button for direct styling control
+        browse_button = tk.Button(
+            frame, 
+            text="Browse...", 
+            command=lambda: self.browse_directory(entry),
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR,
+            padx=10
+        )
         browse_button.pack(side="left", padx=(5, 0))
         
         # Store the entry widget as an attribute
@@ -151,17 +220,17 @@ class SetupWizard(tk.Tk):
             widget.destroy()
 
         # Add a header
-        self.header_frame = tk.Frame(self, bg=THEME_COLOR, height=70)
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
         self.header_frame.pack(fill="x")
         self.header_frame.pack_propagate(False)
         
-        header_font = Font(family="Arial", size=16, weight="bold")
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
         tk.Label(
             self.header_frame, 
             text="pyTracker Setup", 
             font=header_font, 
-            bg=THEME_COLOR, 
-            fg="white"
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
         ).pack(pady=20)
 
         # Main content frame
@@ -174,7 +243,8 @@ class SetupWizard(tk.Tk):
         self.create_input_field("Sheet ID:", "sheetID_entry")
         self.create_directory_field("Output Directory:", "output_dir_entry")
 
-        ttk.Separator(self.main_frame, orient='horizontal').pack(fill='x', pady=20)
+        separator = tk.Frame(self.main_frame, height=1, bg=SECONDARY_COLOR)
+        separator.pack(fill='x', pady=20)
         
         # Button frame with modern styling
         self.button_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
@@ -182,21 +252,36 @@ class SetupWizard(tk.Tk):
         
         # Style the buttons
         button_style = ttk.Style()
-        button_style.configure("TButton", font=("Arial", 10))
-        button_style.configure("Primary.TButton", background=BTN_COLOR)
+        button_style.configure("TButton", font=("Inter Regular", 10))
+        button_style.configure("Primary.TButton", background=SECONDARY_COLOR)
         
-        self.cancel_button = ttk.Button(
+        self.cancel_button = tk.Button(
             self.button_frame, 
             text="Cancel", 
-            command=self.destroy
+            command=self.destroy,
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            padx=10,
+            pady=5,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
         )
         self.cancel_button.pack(side="right", padx=5)
-        
-        self.save_button = ttk.Button(
+
+        self.save_button = tk.Button(
             self.button_frame, 
             text="Save Configuration", 
             command=self.save_config,
-            style="Primary.TButton"
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            padx=10,
+            pady=5,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
         )
         self.save_button.pack(side="right", padx=5)
         
@@ -207,7 +292,8 @@ class SetupWizard(tk.Tk):
         self.status_label = ttk.Label(
             self, 
             textvariable=self.status_var,
-            foreground="gray" 
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
         )
         self.status_label.pack(side="bottom", pady=10)
 
@@ -217,17 +303,17 @@ class SetupWizard(tk.Tk):
             widget.destroy()
 
         # Add a header
-        self.header_frame = tk.Frame(self, bg=THEME_COLOR, height=70)
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
         self.header_frame.pack(fill="x")
         self.header_frame.pack_propagate(False)
         
-        header_font = Font(family="Arial", size=16, weight="bold")
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
         tk.Label(
             self.header_frame, 
             text="pyTracker Setup", 
             font=header_font, 
-            bg=THEME_COLOR, 
-            fg="white"
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
         ).pack(pady=20)
 
         # Main content frame
@@ -248,7 +334,8 @@ class SetupWizard(tk.Tk):
         self.create_input_field("Sheet ID:", "sheetID_entry", default_value=self.config_data.get("sheetID", ""))
         self.create_directory_field("Output Directory:", "output_dir_entry", default_value=self.config_data.get("output_dir", ""))
 
-        ttk.Separator(self.main_frame, orient='horizontal').pack(fill='x', pady=20)
+        separator = tk.Frame(self.main_frame, height=1, bg=SECONDARY_COLOR)
+        separator.pack(fill='x', pady=20)
         
         # Button frame with modern styling
         self.button_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
@@ -256,21 +343,36 @@ class SetupWizard(tk.Tk):
         
         # Style the buttons
         button_style = ttk.Style()
-        button_style.configure("TButton", font=("Arial", 10))
-        button_style.configure("Primary.TButton", background=BTN_COLOR)
+        button_style.configure("TButton", font=("Inter Regular", 10))
+        button_style.configure("Primary.TButton", background=SECONDARY_COLOR)
         
-        self.cancel_button = ttk.Button(
+        self.cancel_button = tk.Button(
             self.button_frame, 
             text="Cancel", 
-            command=self.destroy
+            command=self.destroy,
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            padx=10,
+            pady=5,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
         )
         self.cancel_button.pack(side="right", padx=5)
-        
-        self.save_button = ttk.Button(
+
+        self.save_button = tk.Button(
             self.button_frame, 
             text="Save Configuration", 
             command=self.save_config,
-            style="Primary.TButton"
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            padx=10,
+            pady=5,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
         )
         self.save_button.pack(side="right", padx=5)
         
@@ -281,7 +383,8 @@ class SetupWizard(tk.Tk):
         self.status_label = ttk.Label(
             self, 
             textvariable=self.status_var,
-            foreground="gray" 
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
         )
         self.status_label.pack(side="bottom", pady=10)
 
@@ -290,17 +393,17 @@ class SetupWizard(tk.Tk):
         for widget in self.winfo_children():
             widget.destroy()
 
-        self.header_frame = tk.Frame(self, bg=THEME_COLOR, height=70)
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
         self.header_frame.pack(fill="x")
         self.header_frame.pack_propagate(False)
         
-        header_font = Font(family="Arial", size=16, weight="bold")
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
         tk.Label(
             self.header_frame, 
             text="pyTracker Setup", 
             font=header_font, 
-            bg=THEME_COLOR, 
-            fg="white"
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
         ).pack(pady=20)
 
         setupSheet = messagebox.askokcancel("pyTracker Setup", "Would you like to setup your Google Sheet now?")
@@ -330,9 +433,30 @@ class SetupWizard(tk.Tk):
         was_initialized = initialize_sheets(service, SPREADSHEET_ID, gc)
         if was_initialized:
             print("First-time setup completed successfully.")
+            
+            # Create a success frame
+            success_frame = tk.Frame(self, bg=BG_COLOR)
+            success_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+            
+            # Success message with checkmark
+            success_message = tk.Label(
+                success_frame,
+                text="✓ First-time setup completed successfully!",
+                font=("Inter Regular", 14),
+                fg=TEXT_COLOR,
+                bg=BG_COLOR
+            )
+            success_message.pack(pady=(50, 0))
+            
+            # Update the window to show the success message
+            self.update()
+            
+            # Wait 2 seconds and then close
+            self.after(2000, self.destroy)
         else:
             print("Using existing sheet structure.")
-        
+            messagebox.showinfo("Setup Complete", "Using existing sheet structure.")
+            self.destroy()
         
 
 def loadConfig():
@@ -396,7 +520,7 @@ def initialize_sheets(service, spreadsheet_id, gc_client):
     """Set up the spreadsheet with Applications and Backend sheets."""
     is_initialized = check_if_initialized(gc_client, spreadsheet_id)
     
-    if is_initialized:
+    if (is_initialized):
         print("Spreadsheet already initialized with required sheets.")
         return False
     
@@ -463,6 +587,7 @@ def remove_default_sheets(service, spreadsheet_id, gc_client):
     return sheets_removed
 
 def main():
+    pyglet.font.add_file('public/fonts/Inter-VariableFont_opsz,wght.ttf')
     config = loadConfig()
 
 
