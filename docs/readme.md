@@ -30,7 +30,7 @@ Make a Google [App Key](https://myaccount.google.com/u/1/apppasswords) to use du
 ```
 
 ```
-  python ./src/pyTrackerInstaller2.py
+  python ./src/pyTrackerInstaller.py
 ```
 
 ## Installer
