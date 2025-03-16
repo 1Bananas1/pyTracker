@@ -433,30 +433,9 @@ class SetupWizard(tk.Tk):
         was_initialized = initialize_sheets(service, SPREADSHEET_ID, gc)
         if was_initialized:
             print("First-time setup completed successfully.")
-            
-            # Create a success frame
-            success_frame = tk.Frame(self, bg=BG_COLOR)
-            success_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-            
-            # Success message with checkmark
-            success_message = tk.Label(
-                success_frame,
-                text="✓ First-time setup completed successfully!",
-                font=("Inter Regular", 14),
-                fg=TEXT_COLOR,
-                bg=BG_COLOR
-            )
-            success_message.pack(pady=(50, 0))
-            
-            # Update the window to show the success message
-            self.update()
-            
-            # Wait 2 seconds and then close
-            self.after(2000, self.destroy)
         else:
             print("Using existing sheet structure.")
-            messagebox.showinfo("Setup Complete", "Using existing sheet structure.")
-            self.destroy()
+        
         
 
 def loadConfig():
