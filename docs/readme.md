@@ -39,4 +39,6 @@ Make a new google sheet, and take the ID found with `https://docs.google.com/spr
 Enter the required details, and press set up google sheet
 
 Download Ollama
+
+Warning: If the google sheet has trouble downloading, make a fake company with some random date. This bug will be fixed soon
     
