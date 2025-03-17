@@ -4,7 +4,7 @@ from tkinter.font import Font
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import os
-import json
+import json, GPUtil, pandas as pd
 import sys, time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -48,10 +48,12 @@ class SetupWizard(tk.Tk):
         # Configure styles
         self.configure_styles()
 
-        if os.path.exists(CONFIG_FILE):
-            self.load_main_screen()
-        else:
-            self.load_setup_screen()
+        self.getModel()
+
+        # if os.path.exists(CONFIG_FILE):
+        #     self.load_main_screen()
+        # else:
+        #     self.load_setup_screen()
 
     def configure_styles(self):
         """Configure styles for ttk widgets"""
@@ -436,10 +438,103 @@ class SetupWizard(tk.Tk):
         else:
             print("Using existing sheet structure.")
             
+
+    def getBestModel(self):
+        GPUs = GPUtil.getGPUs()
+        totalFree = 0
+        for gpu in GPUs:
+            totalFree += gpu.memoryTotal
+        print(totalFree)
+        gpuList = pd.read_csv('public/data/ollama_nlp_models.csv')
+        filtered = gpuList.loc[gpuList['VRAM'] <= totalFree]
+        max_target = filtered['VRAM'].max()
+        max_rows = filtered[filtered["VRAM"] == max_target]
+        if len(max_rows) > 1:
+            max_rows = max_rows[max_rows['Approximate Downloads'] == max_rows['Approximate Downloads'].max()]
+        
+
     def getModel(self):
-        pass
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
         
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+
+        # Main content frame
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Center container for buttons
+        center_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
         
+        # Button styles - large with accent color
+        button_font = Font(family="Inter Regular", size=14, weight="bold")
+        button_width = 20
+        button_height = 3
+
+        # Manual Setup Button
+        self.manual_button = tk.Button(
+            center_frame, 
+            text="Manual Setup", 
+            command=self.automatic_setup,
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            font=button_font,
+            relief="flat",
+            borderwidth=0,
+            width=button_width,
+            height=button_height,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
+        )
+        self.manual_button.pack(side="left", padx=15)
+
+        # Automatic Setup Button
+        self.automatic_button = tk.Button(
+            center_frame, 
+            text="Automatic", 
+            command=self.getBestModel,
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            font=button_font,
+            relief="flat",
+            borderwidth=0,
+            width=button_width,
+            height=button_height,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
+        )
+        self.automatic_button.pack(side="right", padx=15)
+        
+        # Status message at the bottom
+        self.status_var = tk.StringVar()
+        self.status_var.set("Select setup method")
+        
+        self.status_label = ttk.Label(
+            self, 
+            textvariable=self.status_var,
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+        self.status_label.pack(side="bottom", pady=10)
+
+    # Add this method to handle automatic setup
+    def automatic_setup(self):
+        # This is a placeholder - implement automatic setup logic here
+        messagebox.showinfo("Automatic Setup", "Automatic setup not yet implemented.")
+        # Potentially call a different setup function or skip certain steps
 
 def loadConfig():
     app = SetupWizard()
@@ -574,4 +669,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
