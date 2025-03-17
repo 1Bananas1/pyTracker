@@ -435,6 +435,9 @@ class SetupWizard(tk.Tk):
             print("First-time setup completed successfully.")
         else:
             print("Using existing sheet structure.")
+            
+    def getModel(self):
+        pass
         
         
 
