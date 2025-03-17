@@ -155,18 +155,33 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
         return []
 
 def getOllamaResponse(email):
-    response = ollama.chat(model='llama3:8b', messages=[
+    response = ollama.chat(model='mistral', messages=[
+    {
+        'role': 'system',
+        'content': 'You are a JSON extraction tool ONLY. You must NEVER provide explanations, descriptions, or any text outside the requested JSON format. ONLY output valid JSON inside triple backticks.'
+    },
     {
         'role': 'user',
         'content': '''
-    You are a data entry assistant extracting job application information from emails.
-
-    TASK: Extract ONLY these three fields:
-    1. "Job Name": The position title with ID if present
-    2. "Company": The company name 
-    3. "Status": MUST be exactly one of: "Received", "Rejected", "Reviewing", or "Draft"
-
-    Provide your answer in this exact format with NO additional explanation:
+    CRITICAL INSTRUCTIONS:
+    1. ONLY return a JSON object in the EXACT format shown below
+    2. DO NOT include any explanations or descriptions
+    3. DO NOT describe the HTML structure
+    4. DO NOT engage in conversation
+    5. Triple backticks MUST wrap your JSON response
+    
+    EXTRACT these fields:
+    - "Job Name": Position title with ID if present
+    - "Company": Company name (extract from domain or signature if needed)
+    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", or "Draft"
+    
+    STATUS DEFINITIONS:
+    - "Received": Initial application acknowledgements, thank you messages
+    - "Rejected": Clear rejections ("not moving forward", "other candidates", etc)
+    - "Reviewing": Interview invites, being under consideration
+    - "Draft": Only when status is completely unclear
+    
+    YOUR RESPONSE MUST BE ONLY:
     ```
     {
         "Job Name": "extracted job title",
@@ -174,13 +189,11 @@ def getOllamaResponse(email):
         "Status": "one of the allowed status values"
     }
     ```
-
+    
     EMAIL:
     ''' + email,
-        },
-    ])
-    response_message = response['message']['content']
-    return response_message
+    }])
+    return response['message']['content']
 
 def saveSheet(sh):
     values = sh.get_all_values()
@@ -243,7 +256,6 @@ def getJSON(response_message):
     
     print("Could not extract data from response:")
     print(response_message)
-    logging.info(json.dumps(response_message, indent=4))
     return None
 
 
@@ -279,6 +291,21 @@ def updateSpreadsheet(worksheet, data):
     lists = data.values.tolist()
     worksheet.update(range_name='A2', values=lists)
 
+def log_parse_failure(email_data, ai_response):
+    """
+    Log a parsing failure with clear separation between email and AI response.
+    
+    Args:
+        email_data: The original email dictionary
+        ai_response: The AI's response string
+    """
+    separator = "\n\n\n"  # 3 line breaks as separator
+    
+    email_formatted = json.dumps(email_data, indent=2)
+    logging.info(f"======= FAILED EMAIL PARSING =======")
+    logging.info(f"ORIGINAL EMAIL DATA:{separator}{email_formatted}{separator}")
+    logging.info(f"AI RESPONSE:{separator}{ai_response}{separator}")
+    logging.info(f"====================================")
 
 def main():
     _CONFIG = _load_config()
@@ -313,7 +340,7 @@ def main():
         
         if current is None:
             print(f"Failed to extract JSON from response for email with subject: {email.get('subject', 'Unknown subject')}")
-            logging.info(json.dumps(str(email) + ollamaResponse, indent=4))
+            log_parse_failure(email, ollamaResponse)
             faulty_emails.append(email['id'])
             continue  # Skip to the next email
         

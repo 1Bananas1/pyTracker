@@ -26,7 +26,7 @@ Make a Google [App Key](https://myaccount.google.com/u/1/apppasswords) to use du
 ```bash
   py -m venv .venv
   .venv\Scripts\activate
-  pip install requirements.txt
+  pip install -r requirements.txt
 ```
 
 ```

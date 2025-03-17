@@ -2,3 +2,4 @@
 config/*
 token.json
 output.log
+!config/.gitignore
