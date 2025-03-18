@@ -3,12 +3,33 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-import os
+import os, requests
+from PIL import Image, ImageTk
+from io import BytesIO
 import json, GPUtil, pandas as pd
 import sys, time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import gspread,pyglet
+from tkinter import PhotoImage
+
+# Add this near the top of your file with other imports
+# Create a rounded rectangle method for tk.Canvas
+tk.Canvas.create_rounded_rectangle = lambda self, x1, y1, x2, y2, radius=25, **kwargs: \
+    self.create_polygon(
+        x1+radius, y1,
+        x2-radius, y1,
+        x2, y1,
+        x2, y1+radius,
+        x2, y2-radius,
+        x2, y2,
+        x2-radius, y2,
+        x1+radius, y2,
+        x1, y2,
+        x1, y2-radius,
+        x1, y1+radius,
+        x1, y1,
+        smooth=True, **kwargs)
 
 CONFIG_DIR = "config"
 CONFIG_FILE = os.path.join(CONFIG_DIR, "email_config.json")
@@ -21,6 +42,16 @@ TEXT_COLOR = "#ebe9fc"  # Text color for readability
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
+
+def load_image_from_url(url, width=None, height=None):
+    response = requests.get(url)
+    img_data = BytesIO(response.content)
+    img = Image.open(img_data)
+    
+    if width and height:
+        img = img.resize((width, height), Image.LANCZOS)
+    
+    return ImageTk.PhotoImage(img)
 
 class SetupWizard(tk.Tk):
     def __init__(self):
@@ -47,9 +78,10 @@ class SetupWizard(tk.Tk):
 
         # Configure styles
         self.configure_styles()
+        
+        self.manualModel()
 
-        self.getModel()
-
+        # Check if configuration exists and load appropriate screen
         # if os.path.exists(CONFIG_FILE):
         #     self.load_main_screen()
         # else:
@@ -410,17 +442,20 @@ class SetupWizard(tk.Tk):
 
         setupSheet = messagebox.askokcancel("pyTracker Setup", "Would you like to setup your Google Sheet now?")
         if not setupSheet:
-            self.destroy()
+            # If user chooses to skip sheet setup, go to model selection
+            self.getModel()
             return
         
         if not os.path.exists(CONFIG_FILE):
             messagebox.showerror("Error", "No configuration file found!")
-            self.destroy()
+            # Even after error, go to model selection
+            self.getModel()
             return
         
         if not os.path.exists(os.path.join(CONFIG_DIR, "credentials.json")):
             messagebox.showerror("Error", "No credentials file found!")
-            self.destroy()
+            # Even after error, go to model selection
+            self.getModel()
             return
         
         print("Starting Google Sheet setup...")
@@ -437,21 +472,231 @@ class SetupWizard(tk.Tk):
             print("First-time setup completed successfully.")
         else:
             print("Using existing sheet structure.")
-            
+        
+        # After completing sheet setup, proceed to model selection
+        self.getModel()
 
     def getBestModel(self):
         GPUs = GPUtil.getGPUs()
         totalFree = 0
         for gpu in GPUs:
             totalFree += gpu.memoryTotal
-        print(totalFree)
+        #print(totalFree)
         gpuList = pd.read_csv('public/data/ollama_nlp_models.csv')
-        filtered = gpuList.loc[gpuList['VRAM'] <= totalFree]
-        max_target = filtered['VRAM'].max()
-        max_rows = filtered[filtered["VRAM"] == max_target]
-        if len(max_rows) > 1:
-            max_rows = max_rows[max_rows['Approximate Downloads'] == max_rows['Approximate Downloads'].max()]
+        recommendedFiltered = gpuList.loc[gpuList['recVRAM'] <= totalFree]
+        minFiltered = gpuList.loc[gpuList['VRAM'] <= totalFree]
+        #print(recommendedFiltered,minFiltered)
         
+        # Get the index of the row with max Parameter Size, then select the entire row
+        if not minFiltered.empty:
+            max_idx = minFiltered['Parameter Size'].idxmax()
+            selected = minFiltered.loc[max_idx]
+            model_version = selected['Model Name'] + ':' + selected['normP']
+            
+            # Save the model version to the configuration file
+            try:
+                # Read existing config if available
+                config_data = {}
+                if os.path.exists(CONFIG_FILE):
+                    with open(CONFIG_FILE, 'r') as f:
+                        config_data = json.load(f)
+                
+                # Add or update the model information
+                config_data['model_version'] = model_version
+                
+                
+                # Ensure config directory exists
+                if not os.path.exists(CONFIG_DIR):
+                    os.makedirs(CONFIG_DIR)
+                
+                # Save the updated configuration
+                with open(CONFIG_FILE, 'w') as f:
+                    json.dump(config_data, f)
+                
+                self.status_var.set(f"Selected model: {model_version}")
+                messagebox.showinfo("Model Selected", f"The model {model_version} has been selected and saved to your configuration.")
+                
+                return selected
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not save model selection: {str(e)}")
+                return None
+        else:
+            messagebox.showwarning("No Models Found", "No compatible models were found for your GPU.")
+            print("No compatible models found")
+            return None
+        
+    def manualModel(self):
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Instructions label
+        tk.Label(
+            self.main_frame,
+            text="Select an LLM model to use with pyTracker:",
+            font=("Inter Regular", 12),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR
+        ).pack(pady=(0, 10))
+        
+        # Create a canvas with scrollbar for the models
+        canvas_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        canvas_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Add scrollbar
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create canvas
+        canvas = tk.Canvas(
+            canvas_frame, 
+            bg=BG_COLOR,
+            yscrollcommand=scrollbar.set,
+            highlightthickness=0  # Remove border
+        )
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        # Configure scrollbar to work with canvas
+        scrollbar.config(command=canvas.yview)
+        
+        # Frame inside canvas to hold models
+        models_frame = tk.Frame(canvas, bg=BG_COLOR)
+        
+        # Create a window within the canvas to contain the models frame
+        canvas_window = canvas.create_window((0, 0), window=models_frame, anchor="nw")
+        
+        # Define your models
+        models = [
+            {"name": "Qwen", "image": "public/logos/qwen-color.png", "id": "qwen"},
+            {"name": "Llama", "image": "public/logos/llama-color.png", "id": "llama"},
+            {"name": "Mistral", "image": "public/logos/mistral-color.png", "id": "mistral"},
+            {"name": "Gemma", "image": "public/logos/gemma-color.png", "id": "gemma"},
+            {"name": "Phi", "image": "public/logos/phi-color.png", "id": "phi"}
+            # Add more models as needed
+        ]
+        
+        # Calculate columns dynamically (max 3 columns)
+        cols = min(3, len(models))
+        
+        # Create a grid of model buttons
+        for i, model in enumerate(models):
+            # Calculate grid position
+            row = i // cols
+            col = i % cols
+            
+            # Create container frame with FIXED size to prevent layout shifts
+            container = tk.Frame(
+                models_frame,
+                bg=BG_COLOR,  # Change to background color so it blends in
+                width=100,    # Fixed width
+                height=100,   # Fixed height
+                bd=0
+            )
+            container.grid(row=row*2, column=col, padx=15, pady=10)
+            container.grid_propagate(False)  # Prevent size changes
+            
+            # Create a canvas with rounded corners for the border
+            canvas = tk.Canvas(
+                container,
+                bg=BG_COLOR,
+                highlightthickness=0,
+                width=100,
+                height=100
+            )
+            canvas.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Draw rounded rectangle for border
+            border_id = canvas.create_rounded_rectangle(
+                10, 10, 90, 90,  # Coordinates
+                radius=10,       # Radius for rounded corners
+                fill=BG_COLOR,
+                outline=PRIMARY_COLOR,
+                width=2
+            )
+            
+            # Load image
+            try:
+                img = Image.open(model["image"])
+                img = img.resize((70, 70), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                
+                # Create larger image for hover state
+                hover_img = Image.open(model["image"])
+                hover_img = hover_img.resize((80, 80), Image.LANCZOS)
+                hover_photo = ImageTk.PhotoImage(hover_img)
+                
+                # Add image to canvas
+                image_id = canvas.create_image(50, 50, image=photo, anchor="center")
+                canvas.image = photo  # Keep reference
+                canvas.hover_image = hover_photo  # Keep reference
+                
+                # Add hover effects without moving other elements
+                def on_enter(e, canv=canvas, h_img=hover_photo, b_id=border_id):
+                    canv.itemconfig(b_id, outline=ACCENT_COLOR, width=3)
+                    canv.itemconfig(canv.find_withtag("current")[0], image=h_img)
+                    
+                def on_leave(e, canv=canvas, o_img=photo, b_id=border_id):
+                    canv.itemconfig(b_id, outline=PRIMARY_COLOR, width=2)
+                    canv.itemconfig(canv.find_withtag("current")[0], image=o_img)
+                    
+                canvas.tag_bind(image_id, "<Enter>", on_enter)
+                canvas.tag_bind(image_id, "<Leave>", on_leave)
+                canvas.tag_bind(image_id, "<Button-1>", 
+                            lambda e, m=model["id"]: self.select_model(m))
+                
+                # Add label
+                tk.Label(
+                    models_frame,
+                    text=model["name"],
+                    fg=TEXT_COLOR,
+                    bg=BG_COLOR,
+                    font=("Inter Regular", 11)
+                ).grid(row=row*2+1, column=col)
+                
+            except Exception as e:
+                print(f"Error loading image for {model['name']}: {e}")
+        
+        # Ensure mousewheel scrolling works
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+        
+        # Update scrollregion when all widgets are in place
+        def configure_scroll_region(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Set the width of the canvas window to the width of the canvas
+            canvas.itemconfig(canvas_window, width=canvas.winfo_width())
+        
+        models_frame.bind("<Configure>", configure_scroll_region)
+        
+        # Status message at the bottom
+        self.status_var = tk.StringVar()
+        self.status_var.set("Select a model to continue")
+        
+        self.status_label = ttk.Label(
+            self, 
+            textvariable=self.status_var,
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+        self.status_label.pack(side="bottom", pady=10)
 
     def getModel(self):
         self.title('pyTracker Model Selection')
@@ -535,6 +780,49 @@ class SetupWizard(tk.Tk):
         # This is a placeholder - implement automatic setup logic here
         messagebox.showinfo("Automatic Setup", "Automatic setup not yet implemented.")
         # Potentially call a different setup function or skip certain steps
+
+    def select_model(self, model_id):
+        # Update configuration with selected model
+        pass
+        # try:
+        #     config_data = {}
+        #     if os.path.exists(CONFIG_FILE):
+        #         with open(CONFIG_FILE, 'r') as f:
+        #             config_data = json.load(f)
+            
+        #     config_data['model_id'] = model_id
+            
+        #     # Ensure config directory exists
+        #     if not os.path.exists(CONFIG_DIR):
+        #         os.makedirs(CONFIG_DIR)
+            
+        #     # Save config
+        #     with open(CONFIG_FILE, 'w') as f:
+        #         json.dump(config_data, f)
+                
+        #     self.status_var.set(f"Selected model: {model_id}")
+        #     messagebox.showinfo("Model Selected", f"Model {model_id} has been selected")
+            
+        # except Exception as e:
+        #     messagebox.showerror("Error", f"Could not save model selection: {str(e)}")
+
+    def create_rounded_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
+        """Draw a rounded rectangle on a canvas."""
+        points = [
+            x1+radius, y1,
+            x2-radius, y1,
+            x2, y1,
+            x2, y1+radius,
+            x2, y2-radius,
+            x2, y2,
+            x2-radius, y2,
+            x1+radius, y2,
+            x1, y2,
+            x1, y2-radius,
+            x1, y1+radius,
+            x1, y1
+        ]
+        return canvas.create_polygon(points, **kwargs, smooth=True)
 
 def loadConfig():
     app = SetupWizard()
@@ -669,4 +957,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

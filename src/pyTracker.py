@@ -154,8 +154,8 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
             print("Required scopes: https://www.googleapis.com/auth/gmail.readonly or https://www.googleapis.com/auth/gmail.modify")
         return []
 
-def getOllamaResponse(email):
-    response = ollama.chat(model='mistral', messages=[
+def getOllamaResponse(email,model):
+    response = ollama.chat(model=model, messages=[
     {
         'role': 'system',
         'content': 'You are a JSON extraction tool ONLY. You must NEVER provide explanations, descriptions, or any text outside the requested JSON format. ONLY output valid JSON inside triple backticks.'
@@ -312,6 +312,7 @@ def main():
     EMAIL = _CONFIG['email']
     APP_KEY = _CONFIG['appKey']
     SHEET_ID = _CONFIG['sheetID']
+    model = _CONFIG['model_version']
     creds = get_credentials()
     logging.basicConfig(filename='output.log', level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -335,7 +336,7 @@ def main():
     
     for email in emails:
         entry = {'Status':'','Company':'','Date Applied':'','Last Applied':'','Link':'','Role':'','Last Updated':''}
-        ollamaResponse = getOllamaResponse(str(email))
+        ollamaResponse = getOllamaResponse(str(email),model)
         current = getJSON(ollamaResponse)
         
         if current is None:

@@ -3,3 +3,4 @@ config/*
 token.json
 output.log
 !config/.gitignore
+fix-pip.py
