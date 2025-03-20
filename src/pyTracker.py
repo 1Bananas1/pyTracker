@@ -4,6 +4,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import html.parser
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -12,6 +13,24 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.labels'
 ]
 
+class HTMLStripper(html.parser.HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.strict = False
+        self.convert_charrefs = True
+        self.text = []
+    
+    def handle_data(self, d):
+        self.text.append(d)
+    
+    def get_data(self):
+        return ''.join(self.text)
+
+def strip_html_tags(html_text):
+    s = HTMLStripper()
+    s.feed(html_text)
+    return s.get_data()
 
 def get_credentials():
     config = _load_config()
@@ -123,10 +142,22 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
                                 body_data = part['body']['data']
                                 body = base64.urlsafe_b64decode(body_data).decode('utf-8')
                                 break
+                        elif part['mimeType'] == 'text/html':  # Try HTML part if no plain text
+                            if 'data' in part['body']:
+                                body_data = part['body']['data']
+                                html_body = base64.urlsafe_b64decode(body_data).decode('utf-8')
+                                if not body:  # Only use HTML if we haven't found plain text
+                                    body = strip_html_tags(html_body)
                 elif 'body' in msg['payload'] and 'data' in msg['payload']['body']:
                     body_data = msg['payload']['body']['data']
-                    body = base64.urlsafe_b64decode(body_data).decode('utf-8')
-                
+                    body_text = base64.urlsafe_b64decode(body_data).decode('utf-8')
+                    # Check if this might be HTML
+                    if body_text.strip().startswith('<') and '>' in body_text:
+                        body = strip_html_tags(body_text)
+                    else:
+                        body = body_text
+
+                # Clean up whitespace as before
                 body = re.sub(r'\s+', ' ', body).strip()
                 # Add email to list with internalDate for sorting
                 email_list.append({
