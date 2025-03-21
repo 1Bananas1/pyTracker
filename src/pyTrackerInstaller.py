@@ -555,31 +555,9 @@ class SetupWizard(tk.Tk):
             fg=TEXT_COLOR
         ).pack(pady=(0, 10))
         
-        # Create a canvas with scrollbar for the models
-        canvas_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
-        canvas_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Add scrollbar
-        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical")
-        scrollbar.pack(side="right", fill="y")
-        
-        # Create canvas
-        canvas = tk.Canvas(
-            canvas_frame, 
-            bg=BG_COLOR,
-            yscrollcommand=scrollbar.set,
-            highlightthickness=0  # Remove border
-        )
-        canvas.pack(side="left", fill="both", expand=True)
-        
-        # Configure scrollbar to work with canvas
-        scrollbar.config(command=canvas.yview)
-        
-        # Frame inside canvas to hold models
-        models_frame = tk.Frame(canvas, bg=BG_COLOR)
-        
-        # Create a window within the canvas to contain the models frame
-        canvas_window = canvas.create_window((0, 0), window=models_frame, anchor="nw")
+        # Simply use a frame instead of canvas+scrollbar
+        models_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        models_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Define your models
         models = [
@@ -587,12 +565,12 @@ class SetupWizard(tk.Tk):
             {"name": "Llama", "image": "public/logos/llama-color.png", "id": "llama"},
             {"name": "Mistral", "image": "public/logos/mistral-color.png", "id": "mistral"},
             {"name": "Gemma", "image": "public/logos/gemma-color.png", "id": "gemma"},
-            {"name": "Phi", "image": "public/logos/phi-color.png", "id": "phi"}
-            # Add more models as needed
+            {"name": "Phi", "image": "public/logos/phi-color.png", "id": "phi"},
+            {"name": "Llava", "image": "public/logos/llava-color.png", "id": "llava"}
         ]
         
-        # Calculate columns dynamically (max 3 columns)
-        cols = min(3, len(models))
+        # Calculate columns - use 3 columns for better visibility
+        cols = min(4, len(models))
         
         # Create a grid of model buttons
         for i, model in enumerate(models):
@@ -600,16 +578,16 @@ class SetupWizard(tk.Tk):
             row = i // cols
             col = i % cols
             
-            # Create container frame with FIXED size to prevent layout shifts
+            # Create container frame with FIXED size
             container = tk.Frame(
                 models_frame,
-                bg=BG_COLOR,  # Change to background color so it blends in
-                width=100,    # Fixed width
-                height=100,   # Fixed height
+                bg=BG_COLOR,
+                width=100,
+                height=100,
                 bd=0
             )
             container.grid(row=row*2, column=col, padx=15, pady=10)
-            container.grid_propagate(False)  # Prevent size changes
+            container.grid_propagate(False)
             
             # Create a canvas with rounded corners for the border
             canvas = tk.Canvas(
@@ -661,6 +639,7 @@ class SetupWizard(tk.Tk):
                             lambda e, m=model["id"]: self.select_model(m))
                 
                 # Add label
+                
                 tk.Label(
                     models_frame,
                     text=model["name"],
@@ -672,19 +651,6 @@ class SetupWizard(tk.Tk):
             except Exception as e:
                 print(f"Error loading image for {model['name']}: {e}")
         
-        # Ensure mousewheel scrolling works
-        def on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        
-        # Update scrollregion when all widgets are in place
-        def configure_scroll_region(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            # Set the width of the canvas window to the width of the canvas
-            canvas.itemconfig(canvas_window, width=canvas.winfo_width())
-        
-        models_frame.bind("<Configure>", configure_scroll_region)
         
         # Status message at the bottom
         self.status_var = tk.StringVar()
