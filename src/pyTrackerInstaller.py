@@ -53,6 +53,9 @@ def load_image_from_url(url, width=None, height=None):
     
     return ImageTk.PhotoImage(img)
 
+
+
+
 class SetupWizard(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -525,6 +528,53 @@ class SetupWizard(tk.Tk):
             print("No compatible models found")
             return None
         
+    def tempCommand(self):
+        pass
+        
+    def gotoModelVersionSelection(self,model):
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        filtered = self.select_model(model)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Instructions label
+        tk.Label(
+            self.main_frame,
+            text=f"Select which {model} version to use with pyTracker:",
+            font=("Inter Regular", 12),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR
+        ).pack(pady=(0, 10))
+        
+        models_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        models_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        cardAmounts = len(filtered['version'].unique())
+        
+        for index, element in enumerate(filtered['version'].unique()):
+            matching_row = filtered[filtered['version'] == element].iloc[0]
+            img_path = matching_row['imgloc']
+            card = self.createCard(models_frame, element,scale=1.5,modelImg=img_path)
+            card.pack(side="left", padx=10, pady=10)
+            
+        
+        
     def manualModel(self):
         self.title('pyTracker Model Selection')
         for widget in self.winfo_children():
@@ -566,7 +616,7 @@ class SetupWizard(tk.Tk):
             {"name": "Mistral", "image": "public/logos/mistral-color.png", "id": "mistral"},
             {"name": "Gemma", "image": "public/logos/gemma-color.png", "id": "gemma"},
             {"name": "Phi", "image": "public/logos/phi-color.png", "id": "phi"},
-            {"name": "Llava", "image": "public/logos/llava-color.png", "id": "llava"}
+            {"name": "Llava", "image": "public/logos/llava-color.png", "id": "llava","command":"llavaModels"}
         ]
         
         # Calculate columns - use 3 columns for better visibility
@@ -636,7 +686,7 @@ class SetupWizard(tk.Tk):
                 canvas.tag_bind(image_id, "<Enter>", on_enter)
                 canvas.tag_bind(image_id, "<Leave>", on_leave)
                 canvas.tag_bind(image_id, "<Button-1>", 
-                            lambda e, m=model["id"]: self.select_model(m))
+                            lambda e, m=model["id"]: self.gotoModelVersionSelection(m))
                 
                 # Add label
                 
@@ -663,6 +713,28 @@ class SetupWizard(tk.Tk):
             background=BG_COLOR
         )
         self.status_label.pack(side="bottom", pady=10)
+
+    def manualModelVersions(self):
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
 
     def getModel(self):
         self.title('pyTracker Model Selection')
@@ -746,31 +818,94 @@ class SetupWizard(tk.Tk):
         # This is a placeholder - implement automatic setup logic here
         messagebox.showinfo("Automatic Setup", "Automatic setup not yet implemented.")
         # Potentially call a different setup function or skip certain steps
+        
+    def createCard(self, parent, modelVersion,scale,modelImg,command=tempCommand):
+        # Create main container
+        
+        container = tk.Frame(
+            parent,
+            bg=BG_COLOR,
+            width=int(100*scale),
+            height=int(135*scale),
+            bd=0
+        )
+        
+        # Create a canvas with rounded corners for the border
+        canvas = tk.Canvas(
+            container,  # Attach to container, not parent frame
+            bg=BG_COLOR,
+            highlightthickness=0,
+            width=int(100*scale),
+            height=int(135*scale)
+        )
+        canvas.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Draw rounded rectangle for border
+        border_id = canvas.create_rounded_rectangle(
+            int(10*scale), int(10*scale), int(90*scale), int(90*scale),  # Coordinates
+            radius=10*int(scale),       # Radius for rounded corners
+            fill=BG_COLOR,
+            outline=PRIMARY_COLOR,
+            width=2
+        )
+        
+        # Load image
+        try:
+            img = Image.open(modelImg)
+            img = img.resize((int(70*scale), int(70*scale)), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            
+            # Create larger image for hover state
+            hover_img = img.copy()
+            hover_img = hover_img.resize((int(80*scale), int(80*scale)), Image.LANCZOS)
+            hover_photo = ImageTk.PhotoImage(hover_img)
+            
+            # Add image to canvas
+            image_id = canvas.create_image(int(50*scale), int(50*scale), image=photo, anchor="center")
+            canvas.image = photo  # Keep reference
+            canvas.hover_image = hover_photo  # Keep reference
+            
+            # Add hover effects without moving other elements
+            def on_enter(e, canv=canvas, h_img=hover_photo, b_id=border_id):
+                canv.itemconfig(b_id, outline=ACCENT_COLOR, width=3)
+                canv.itemconfig(canv.find_withtag("current")[0], image=h_img)
+                
+            def on_leave(e, canv=canvas, o_img=photo, b_id=border_id):
+                canv.itemconfig(b_id, outline=PRIMARY_COLOR, width=2)
+                canv.itemconfig(canv.find_withtag("current")[0], image=o_img)
+                
+            canvas.tag_bind(image_id, "<Enter>", on_enter)
+            canvas.tag_bind(image_id, "<Leave>", on_leave)
+            canvas.tag_bind(image_id, "<Button-1>", 
+                        lambda e, m=modelVersion: self.command())
+            
+            # Add label - attach to container, not parent frame
+            label = tk.Label(
+                container,
+                text=modelVersion,
+                fg=TEXT_COLOR,
+                bg=BG_COLOR,
+                font=("Inter Regular", 11)
+            )
+            label.place(relx=0.5, rely=0.9, anchor="center")
+            
+        except Exception as e:
+            print(f"Error loading image for {modelVersion}: {e}")
+        
+        # Store references to prevent garbage collection
+        container.canvas = canvas
+        
+        # Return the container which now has everything inside it
+        return container
+        
 
     def select_model(self, model_id):
-        # Update configuration with selected model
-        pass
-        # try:
-        #     config_data = {}
-        #     if os.path.exists(CONFIG_FILE):
-        #         with open(CONFIG_FILE, 'r') as f:
-        #             config_data = json.load(f)
-            
-        #     config_data['model_id'] = model_id
-            
-        #     # Ensure config directory exists
-        #     if not os.path.exists(CONFIG_DIR):
-        #         os.makedirs(CONFIG_DIR)
-            
-        #     # Save config
-        #     with open(CONFIG_FILE, 'w') as f:
-        #         json.dump(config_data, f)
-                
-        #     self.status_var.set(f"Selected model: {model_id}")
-        #     messagebox.showinfo("Model Selected", f"Model {model_id} has been selected")
-            
-        # except Exception as e:
-        #     messagebox.showerror("Error", f"Could not save model selection: {str(e)}")
+        models_df = pd.read_csv("public\data\ollama_nlp_models.csv",index_col=['Model Name'])
+        print(model_id)
+        filtered_models = models_df[models_df["modelAuthor"] == model_id]
+        # self.gotoModelVersionSelection(filtered_models=filtered_models)
+        return filtered_models
+
 
     def create_rounded_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
         """Draw a rounded rectangle on a canvas."""

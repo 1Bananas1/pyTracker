@@ -210,7 +210,6 @@ def getOllamaResponse(email,model):
     STATUS DEFINITIONS:
     - "Received": Initial application acknowledgements, thank you messages
     - "Rejected": Clear rejections ("not moving forward", "other candidates", etc)
-    - "Reviewing": Interview invites, being under consideration
     - "Draft": Only when status is completely unclear
     
     YOUR RESPONSE MUST BE ONLY:
