@@ -530,6 +530,40 @@ class SetupWizard(tk.Tk):
         
     def tempCommand(self):
         pass
+    
+    def gotoModelParameterSelection(self,model):
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        filtered = self.select_model(model)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Instructions label
+        tk.Label(
+            self.main_frame,
+            text=f"Select which {model} version to use with pyTracker:",
+            font=("Inter Regular", 12),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR
+        ).pack(pady=(0, 10))
+        
+        models_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        models_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
     def gotoModelVersionSelection(self,model):
         self.title('pyTracker Model Selection')
