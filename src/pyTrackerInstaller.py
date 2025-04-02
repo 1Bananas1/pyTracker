@@ -977,7 +977,13 @@ class SetupWizard(tk.Tk):
                 version = version[:-2]
                 
             # Format based on model family conventions
-            if model_family == "llama":
+            if model_family == "mistral":
+                # Special case for mistral which doesn't use version number
+                if param_size.lower() == "default" or not param_size:
+                    model_string = f"{model_family}"
+                else:
+                    model_string = f"{model_family}:{param_size.lower()}"
+            elif model_family == "llama":
                 # Llama uses format like llama3.1 or llama3.1:8b
                 if param_size.lower() == "default" or not param_size:
                     model_string = f"{model_family}{version}"
@@ -1178,30 +1184,87 @@ class SetupWizard(tk.Tk):
 
 
 def get_credentials():
-    with open(CONFIG_FILE, 'r') as f:
-        config = json.load(f)
+    """
+    Get Google API credentials, handling expired tokens gracefully.
+    Automatically deletes invalid tokens and creates new ones when needed.
+    
+    Returns:
+        Google API credentials object
+    """
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        return None
 
-    creds = None
     # The file token.json stores the user's access and refresh tokens
     token_path = os.path.join(CONFIG_DIR, 'token.json')
+    creds = None
+    token_valid = True
     
     # Check if token.json exists with valid credentials
     if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_info(
-            json.load(open(token_path)), SCOPES)
+        try:
+            # Try to load existing credentials
+            creds = Credentials.from_authorized_user_info(
+                json.load(open(token_path)), SCOPES)
+                
+            # Test if credentials are valid by making a small request
+            if creds.valid:
+                try:
+                    # Quick test to see if token actually works
+                    service = build('sheets', 'v4', credentials=creds)
+                    service.spreadsheets().get(spreadsheetId="dummy").execute()
+                except Exception:
+                    # If test request fails, mark token as invalid
+                    print("Token appears to be invalid despite being marked as valid")
+                    token_valid = False
+                    
+        except Exception as e:
+            # If there's any error loading or using the token
+            print(f"Error with existing token: {e}")
+            token_valid = False
     
-    # If there are no valid credentials, let the user log in
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                os.path.join(CONFIG_DIR, 'credentials.json'), SCOPES)
-            creds = flow.run_local_server(port=0)
+    # If there's no valid token, we need new credentials
+    if not creds or not token_valid:
+        # If token exists but is invalid, try to refresh it
+        if creds and creds.expired and creds.refresh_token and token_valid:
+            try:
+                creds.refresh(Request())
+                print("Successfully refreshed expired token")
+            except Exception as e:
+                print(f"Failed to refresh token: {e}")
+                token_valid = False
+                creds = None  # Clear the invalid credentials
         
-        # Save the credentials for the next run
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
+        # If token couldn't be refreshed or wasn't valid to begin with, create a new one
+        if not token_valid or not creds:
+            # First remove the invalid token if it exists
+            if os.path.exists(token_path):
+                try:
+                    os.remove(token_path)
+                    print(f"Removed invalid token file: {token_path}")
+                except Exception as e:
+                    print(f"Error removing invalid token file: {e}")
+            
+            # Now get new credentials via OAuth flow
+            try:
+                credentials_path = os.path.join(CONFIG_DIR, 'credentials.json')
+                if not os.path.exists(credentials_path):
+                    print(f"Error: Credentials file not found at {credentials_path}")
+                    return None
+                    
+                flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+                creds = flow.run_local_server(port=0)
+                
+                # Save the new credentials
+                with open(token_path, 'w') as token:
+                    token.write(creds.to_json())
+                print("Generated and saved new token")
+            except Exception as e:
+                print(f"Error generating new token: {e}")
+                return None
     
     return creds
 
