@@ -134,7 +134,6 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
                     print(f"Processing email {i+1}/{len(messages)}...")
                 
                 msg = service.users().messages().get(userId='me', id=message['id']).execute()
-                
                 # Extract headers
                 headers = {}
                 headers = {header['name']: header['value'] for header in msg['payload']['headers']}
@@ -183,6 +182,9 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
                 if 'body' in msg['payload'] and 'data' in msg['payload']['body'] and msg['payload']['body'].get('size', 0) > 0:
                     data = msg['payload']['body']['data']
                     content = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+                    
+                    # logging.info(f"Decoded body content for message ID {message['id']}:")
+                    # logging.info(f"Content sample (first 500 chars): {content[:500]}")
                     
                     if '<html' in content.lower() or '<body' in content.lower() or '<div' in content.lower():
                         # This is likely HTML content
@@ -464,7 +466,7 @@ def main():
         entry = {'Status':'','Company':'','Date Applied':'','Last Applied':'','Link':'','Role':'','Last Updated':''}
         ollamaResponse = getOllamaResponse(str({k: email[k] for k in ['subject', 'body']}),model)
         current = getJSON(ollamaResponse)
-        log_parse_failure(email, ollamaResponse)
+        # log_parse_failure(email, ollamaResponse)
         
         if current is None:
             print(f"Failed to extract JSON from response for email with subject: {email.get('subject', 'Unknown subject')}")
