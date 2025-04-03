@@ -301,12 +301,14 @@ def getOllamaResponse(email,model):
     EXTRACT these fields:
     - "Job Name": Position title with ID if present
     - "Company": Company name (extract from domain or signature if needed)
-    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", or "Draft"
+    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", "Interview", "Accepted" or "Draft"
     
     STATUS DEFINITIONS:
     - "Received": Initial application acknowledgements, thank you messages
     - "Rejected": Clear rejections ("not moving forward", "other candidates", etc)
     - "Draft": Only when status is completely unclear
+    - "Interview" : Only when the email requests some interview
+    - "Accepted" : Only when a final job offer has been made
     
     YOUR RESPONSE MUST BE ONLY:
     ```
@@ -446,7 +448,7 @@ def main():
 
     gmail_service = build('gmail', 'v1', credentials=creds)
 
-    emails = get_emails_with_label(gmail_service, include_label='Internships', exclude_label='betaprocessed')
+    emails = get_emails_with_label(gmail_service, include_label='Internships', exclude_label='processed')
     if not emails:
         return None
 
@@ -457,7 +459,7 @@ def main():
     df = saveSheet(sh)
     
     # Get the label ID for 'processed' to mark emails after processing
-    processed_label_id = get_label_id(gmail_service, 'betaprocessed')
+    processed_label_id = get_label_id(gmail_service, 'processed')
     emails_to_label = []  # To keep track of emails we've processed
     faulty_emails = []  # To keep track of faulty emails
     
