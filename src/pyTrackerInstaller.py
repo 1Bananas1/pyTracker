@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 import gspread, pyglet
 from tkinter import PhotoImage
 
-# Add this near the top of your file with other imports
+
 # Create a rounded rectangle method for tk.Canvas
 tk.Canvas.create_rounded_rectangle = lambda self, x1, y1, x2, y2, radius=25, **kwargs: \
     self.create_polygon(
