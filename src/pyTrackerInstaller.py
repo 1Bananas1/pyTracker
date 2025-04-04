@@ -9,9 +9,11 @@ from io import BytesIO
 import json, GPUtil, pandas as pd
 import sys, time
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.credentials import TokenState
 from googleapiclient.discovery import build
 import gspread, pyglet
 from tkinter import PhotoImage
+from utils.scopes import SCOPES
 
 
 # Create a rounded rectangle method for tk.Canvas
@@ -40,7 +42,7 @@ ACCENT_COLOR = "#4A90E2"  # Accent color for highlights
 SECONDARY_COLOR = "#217346"  # Secondary color for less important elements
 TEXT_COLOR = "#ebe9fc"  # Text color for readability
 
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+
 
 
 def load_image_from_url(url, width=None, height=None):
@@ -1211,7 +1213,7 @@ def get_credentials():
                 json.load(open(token_path)), SCOPES)
                 
             # Test if credentials are valid by making a small request
-            if creds.valid:
+            if creds.token_state == TokenState.FRESH:
                 try:
                     # Quick test to see if token actually works
                     service = build('sheets', 'v4', credentials=creds)

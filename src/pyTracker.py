@@ -4,14 +4,11 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.auth.credentials import TokenState
 import html.parser
+from utils.scopes import SCOPES
 
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/gmail.labels'
-]
+
 
 class HTMLStripper(html.parser.HTMLParser):
     def __init__(self):
@@ -43,8 +40,8 @@ def get_credentials():
         creds = Credentials.from_authorized_user_info(
             json.load(open(token_path)), SCOPES)
     
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+    if not creds or creds.token_state != TokenState.FRESH:
+        if creds and creds.token_state == TokenState.STALE:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
@@ -327,7 +324,10 @@ def getOllamaResponse(email,model):
 def saveSheet(sh):
     values = sh.get_all_values()
     records = sh.get_all_records()
-    df = pd.DataFrame(records)
+    if not records:
+        df = pd.DataFrame(columns=['Status','Company','Date Applied','Last Updated', 'Link','Role','Company ID', 'Job ID'])
+    else:
+        df = pd.DataFrame(records)
     df.to_csv('config/data.csv', index=False)
     return df
 
@@ -414,7 +414,7 @@ def add_label_to_emails(service, email_ids, label_id):
     service.users().messages().batchModify(userId='me', body=body).execute()
 
 def updateSpreadsheet(worksheet, data):
-    worksheet.batch_clear(['A3:H'])
+    worksheet.batch_clear(['A2:H'])
     data = data.fillna('')
     data = data.map(lambda x: '' if pd.isna(x) else x)
     lists = data.values.tolist()

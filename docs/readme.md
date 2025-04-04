@@ -40,5 +40,4 @@ Enter the required details, and press set up google sheet
 
 Download Ollama
 
-Warning: If the google sheet has trouble downloading, make a fake company with some random date. This bug will be fixed soon
     
