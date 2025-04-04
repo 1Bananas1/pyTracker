@@ -3,12 +3,35 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-import os
-import json
+import os, requests
+from PIL import Image, ImageTk
+from io import BytesIO
+import json, GPUtil, pandas as pd
 import sys, time
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.credentials import TokenState
 from googleapiclient.discovery import build
-import gspread,pyglet
+import gspread, pyglet
+from tkinter import PhotoImage
+from utils.scopes import SCOPES
+
+
+# Create a rounded rectangle method for tk.Canvas
+tk.Canvas.create_rounded_rectangle = lambda self, x1, y1, x2, y2, radius=25, **kwargs: \
+    self.create_polygon(
+        x1+radius, y1,
+        x2-radius, y1,
+        x2, y1,
+        x2, y1+radius,
+        x2, y2-radius,
+        x2, y2,
+        x2-radius, y2,
+        x1+radius, y2,
+        x1, y2,
+        x1, y2-radius,
+        x1, y1+radius,
+        x1, y1,
+        smooth=True, **kwargs)
 
 CONFIG_DIR = "config"
 CONFIG_FILE = os.path.join(CONFIG_DIR, "email_config.json")
@@ -19,7 +42,18 @@ ACCENT_COLOR = "#4A90E2"  # Accent color for highlights
 SECONDARY_COLOR = "#217346"  # Secondary color for less important elements
 TEXT_COLOR = "#ebe9fc"  # Text color for readability
 
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+
+
+
+def load_image_from_url(url, width=None, height=None):
+    response = requests.get(url)
+    img_data = BytesIO(response.content)
+    img = Image.open(img_data)
+    
+    if width and height:
+        img = img.resize((width, height), Image.LANCZOS)
+    
+    return ImageTk.PhotoImage(img)
 
 
 class SetupWizard(tk.Tk):
@@ -30,7 +64,10 @@ class SetupWizard(tk.Tk):
         self.configure(bg=BG_COLOR)
         self.resizable(False, False)
         icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../public/icons/icon.ico"))
-        self.iconbitmap(icon_path)
+        try:
+            self.iconbitmap(icon_path)
+        except tk.TclError:
+            print(f"Warning: Could not load icon from {icon_path}")
 
         # Initialize config_data
         self.config_data = {}
@@ -47,7 +84,11 @@ class SetupWizard(tk.Tk):
 
         # Configure styles
         self.configure_styles()
-
+        
+        # Initialize selection tracking
+        self.finalSelection = []
+        
+        # Check if configuration exists and load appropriate screen
         if os.path.exists(CONFIG_FILE):
             self.load_main_screen()
         else:
@@ -408,17 +449,20 @@ class SetupWizard(tk.Tk):
 
         setupSheet = messagebox.askokcancel("pyTracker Setup", "Would you like to setup your Google Sheet now?")
         if not setupSheet:
-            self.destroy()
+            # If user chooses to skip sheet setup, go to model selection
+            self.getModel()
             return
         
         if not os.path.exists(CONFIG_FILE):
             messagebox.showerror("Error", "No configuration file found!")
-            self.destroy()
+            # Even after error, go to model selection
+            self.getModel()
             return
         
         if not os.path.exists(os.path.join(CONFIG_DIR, "credentials.json")):
             messagebox.showerror("Error", "No credentials file found!")
-            self.destroy()
+            # Even after error, go to model selection
+            self.getModel()
             return
         
         print("Starting Google Sheet setup...")
@@ -436,54 +480,793 @@ class SetupWizard(tk.Tk):
         else:
             print("Using existing sheet structure.")
         
-        
+        # After completing sheet setup, proceed to model selection
+        self.getModel()
 
-def loadConfig():
-    app = SetupWizard()
+    def getBestModel(self):
+        GPUs = GPUtil.getGPUs()
+        totalFree = 0
+        for gpu in GPUs:
+            totalFree += gpu.memoryTotal
+        
+        try:
+            gpuList = pd.read_csv('public/data/ollama_nlp_models.csv')
+            recommendedFiltered = gpuList.loc[gpuList['recVRAM'] <= totalFree]
+            minFiltered = gpuList.loc[gpuList['VRAM'] <= totalFree]
+            
+            # Get the index of the row with max Parameter Size, then select the entire row
+            if not minFiltered.empty:
+                max_idx = minFiltered['Parameter Size'].idxmax()
+                selected = minFiltered.loc[max_idx]
+                model_version = selected['Model Name'] + ':' + selected['normP']
+                
+                # Save the model version to the configuration file
+                try:
+                    # Read existing config if available
+                    config_data = {}
+                    if os.path.exists(CONFIG_FILE):
+                        with open(CONFIG_FILE, 'r') as f:
+                            config_data = json.load(f)
+                    
+                    # Add or update the model information
+                    config_data['model_version'] = model_version
+                    
+                    # Ensure config directory exists
+                    if not os.path.exists(CONFIG_DIR):
+                        os.makedirs(CONFIG_DIR)
+                    
+                    # Save the updated configuration
+                    with open(CONFIG_FILE, 'w') as f:
+                        json.dump(config_data, f)
+                    
+                    self.status_var.set(f"Selected model: {model_version}")
+                    messagebox.showinfo("Model Selected", f"The model {model_version} has been selected and saved to your configuration.")
+                    
+                    # Close the application after successfully setting model
+                    self.destroy()
+                    
+                    return selected
+                except Exception as e:
+                    messagebox.showerror("Error", f"Could not save model selection: {str(e)}")
+                    return None
+            else:
+                messagebox.showwarning("No Models Found", "No compatible models were found for your GPU.")
+                print("No compatible models found")
+                return None
+        except Exception as e:
+            messagebox.showerror("Error", f"Error selecting best model: {str(e)}")
+            return None
+        
+    def flexibleCommand(self, **kwargs):
+        pass
     
-    # Set theme for ttk widgets
-    style = ttk.Style(app)
-    try:
-        if os.name == 'nt':  # Windows
-            style.theme_use('vista')
-        else:  # macOS or Linux
-            style.theme_use('clam')
-    except tk.TclError:
-        # Fall back to a default theme if the specified one isn't available
-        available_themes = style.theme_names()
-        if 'clam' in available_themes:
-            style.theme_use('clam')
-    
-    # Run the application
-    app.mainloop()
+    def getModel(self):
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+
+        # Main content frame
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Center container for buttons
+        center_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Button styles - large with accent color
+        button_font = Font(family="Inter Regular", size=14, weight="bold")
+        button_width = 20
+        button_height = 3
+
+        # Manual Setup Button
+        self.manual_button = tk.Button(
+            center_frame, 
+            text="Manual Setup", 
+            command=self.manualModel,
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            font=button_font,
+            relief="flat",
+            borderwidth=0,
+            width=button_width,
+            height=button_height,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
+        )
+        self.manual_button.pack(side="left", padx=15)
+
+        # Automatic Setup Button
+        self.automatic_button = tk.Button(
+            center_frame, 
+            text="Automatic", 
+            command=self.getBestModel,
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            font=button_font,
+            relief="flat",
+            borderwidth=0,
+            width=button_width,
+            height=button_height,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR
+        )
+        self.automatic_button.pack(side="right", padx=15)
+        
+        # Status message at the bottom
+        self.status_var = tk.StringVar()
+        self.status_var.set("Select setup method")
+        
+        self.status_label = ttk.Label(
+            self, 
+            textvariable=self.status_var,
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+        self.status_label.pack(side="bottom", pady=10)
+
+    def select_model(self, model_id):
+        """
+        Load the model data from CSV and filter by model author/family.
+        
+        Args:
+            model_id: The model identifier to filter by (e.g., "llama", "qwen")
+            
+        Returns:
+            DataFrame containing filtered model data
+        """
+        try:
+            models_df = pd.read_csv("public/data/ollama_nlp_models.csv")
+            filtered_models = models_df[models_df["modelAuthor"] == model_id]
+            return filtered_models
+        except Exception as e:
+            print(f"Error loading model data: {e}")
+            messagebox.showerror("Error", f"Failed to load model data: {e}")
+            return pd.DataFrame()  # Return empty DataFrame on error
+
+    def gotoModelVersionSelection(self, model):
+        """
+        Display model version selection screen after a model family is selected
+        
+        Args:
+            model: Selected model family (e.g., "llama", "qwen")
+        """
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Store the selected model family
+        self.finalSelection = [model]
+        
+        # Get filtered DataFrame for this model
+        filtered = self.select_model(model)
+        if filtered.empty:
+            messagebox.showerror("Error", f"No versions found for {model}")
+            self.manualModel()  # Go back to model selection
+            return
+        
+        # Create header
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text=f"Select which {model} version to use with pyTracker:", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        # Main content frame
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Create frame for version cards
+        models_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        models_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Loop through unique versions and create cards
+        versions = filtered['version'].unique()
+        for i, version in enumerate(versions):
+            # Find the corresponding row for this version
+            matching_rows = filtered[filtered['version'] == version]
+            if not matching_rows.empty:
+                matching_row = matching_rows.iloc[0]
+                img_path = matching_row['imgloc']
+                
+                # Create card with model logo
+                card = self.createVersionCard(models_frame, str(version), img_path)
+                card.grid(row=i//3, column=i%3, padx=10, pady=10)
+        
+        # Add back button
+        back_button = tk.Button(
+            self.main_frame,
+            text="← Back",
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            command=self.manualModel
+        )
+        back_button.pack(side="bottom", pady=10)
+        
+        # Status message at the bottom
+        self.status_var = tk.StringVar()
+        self.status_var.set(f"Select a {model} version")
+        
+        self.status_label = ttk.Label(
+            self, 
+            textvariable=self.status_var,
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+        self.status_label.pack(side="bottom", pady=10)
+
+    def createVersionCard(self, parent, version, img_path):
+        """
+        Create a model version selection card
+        
+        Args:
+            parent: Parent widget
+            version: Version number as string
+            img_path: Path to the model image
+            
+        Returns:
+            Frame containing the version card
+        """
+        # Create container frame
+        container = tk.Frame(
+            parent,
+            bg=BG_COLOR,
+            width=120,
+            height=150,
+            bd=0
+        )
+        container.pack_propagate(False)
+        
+        # Create a canvas with rounded border
+        canvas = tk.Canvas(
+            container,
+            bg=BG_COLOR,
+            highlightthickness=0,
+            width=100,
+            height=100
+        )
+        canvas.pack(pady=(0, 5))
+        
+        # Draw rounded rectangle for border
+        border_id = canvas.create_rounded_rectangle(
+            5, 5, 95, 95,  # Coordinates
+            radius=10,     # Radius for rounded corners
+            fill=BG_COLOR,
+            outline=PRIMARY_COLOR,
+            width=2
+        )
+        
+        # Load and display model image
+        try:
+            img = Image.open(img_path)
+            img = img.resize((70, 70), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            
+            # Create larger image for hover state
+            hover_img = Image.open(img_path)
+            hover_img = hover_img.resize((80, 80), Image.LANCZOS)
+            hover_photo = ImageTk.PhotoImage(hover_img)
+            
+            # Add image to canvas
+            image_id = canvas.create_image(50, 50, image=photo, anchor="center")
+            canvas.image = photo  # Keep reference
+            canvas.hover_image = hover_photo  # Keep reference
+            
+            # Add hover effects
+            def on_enter(e, canv=canvas, h_img=hover_photo, b_id=border_id):
+                canv.itemconfig(b_id, outline=ACCENT_COLOR, width=3)
+                canv.itemconfig(canv.find_withtag("current")[0], image=h_img)
+                
+            def on_leave(e, canv=canvas, o_img=photo, b_id=border_id):
+                canv.itemconfig(b_id, outline=PRIMARY_COLOR, width=2)
+                canv.itemconfig(canv.find_withtag("current")[0], image=o_img)
+                
+            canvas.tag_bind(image_id, "<Enter>", on_enter)
+            canvas.tag_bind(image_id, "<Leave>", on_leave)
+            canvas.tag_bind(image_id, "<Button-1>", 
+                        lambda e, v=version: self.gotoModelParameterSelection(v))
+            
+        except Exception as e:
+            print(f"Error loading image for version {version}: {e}")
+            # Create a fallback text representation if image fails to load
+            canvas.create_text(50, 50, text=version, fill=TEXT_COLOR, font=("Inter Regular", 18))
+        
+        # Version label
+        tk.Label(
+            container,
+            text=version,
+            fg=TEXT_COLOR,
+            bg=BG_COLOR,
+            font=("Inter Regular", 14)
+        ).pack(pady=5)
+        
+        return container
+
+    def gotoModelParameterSelection(self, modelVersion):
+        """
+        Handle selection of a specific model parameter when a model version card is clicked.
+        Will display parameter options for the selected model version and save the selection.
+        
+        Args:
+            modelVersion: The version of the model that was selected (e.g., "2.0", "3.1")
+        """
+        self.title('pyTracker Model Parameter Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Get the filtered models for this version
+        filtered_df = self.select_model(self.finalSelection[0])  # Get base model (e.g., "llama")
+        version_df = filtered_df[filtered_df['version'] == float(modelVersion)]  # Filter by version number
+        
+        # Create header
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text=f"Select {self.finalSelection[0]} {modelVersion} Parameter Size", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        # Main content frame
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Instructions label
+        tk.Label(
+            self.main_frame,
+            text=f"Select which parameter size to use:",
+            font=("Inter Regular", 12),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR
+        ).pack(pady=(0, 10))
+        
+        # Create frame for parameter cards
+        params_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        params_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Get unique parameter sizes for this version
+        param_sizes = version_df['normP'].unique()
+        
+        # Create a card for each parameter size
+        for i, param_size in enumerate(param_sizes):
+            param_df = version_df[version_df['normP'] == param_size]
+            if not param_df.empty:
+                card = self.createParameterCard(params_frame, param_size, param_df.iloc[0], modelVersion)
+                card.grid(row=i//3, column=i%3, padx=10, pady=10)
+        
+        # Add back button
+        back_button = tk.Button(
+            self.main_frame,
+            text="← Back",
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            command=lambda: self.gotoModelVersionSelection(self.finalSelection[0])
+        )
+        back_button.pack(side="bottom", pady=10)
+        
+        # Status message at the bottom
+        self.status_var = tk.StringVar()
+        self.status_var.set(f"Select a parameter size for {self.finalSelection[0]} {modelVersion}")
+        
+        self.status_label = ttk.Label(
+            self, 
+            textvariable=self.status_var,
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+        self.status_label.pack(side="bottom", pady=10)
+
+    def createParameterCard(self, parent, param_size, row_data, model_version):
+        """
+        Create a card for a specific parameter size option
+        
+        Args:
+            parent: Parent widget
+            param_size: The parameter size to display (e.g., "7B", "13B")
+            row_data: DataFrame row containing model information
+            model_version: The version of the model
+            
+        Returns:
+            Frame containing the parameter card
+        """
+        # Get the required VRAM
+        vram_required = row_data['VRAM']
+        
+        # Create container frame
+        container = tk.Frame(
+            parent,
+            bg=BG_COLOR,
+            width=150,
+            height=180,
+            bd=0,
+            highlightbackground=PRIMARY_COLOR,
+            highlightthickness=2,
+            highlightcolor=ACCENT_COLOR
+        )
+        container.pack_propagate(False)
+        
+        # Parameter size label
+        param_label = tk.Label(
+            container,
+            text=param_size,
+            font=("Inter Regular", 16, "bold"),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR
+        )
+        param_label.pack(pady=(20, 5))
+        
+        # Parameter details
+        details_text = f"Parameters: {row_data['RAM Requirement (GB)']}\nVRAM: {vram_required} GB"
+        details_label = tk.Label(
+            container,
+            text=details_text,
+            font=("Inter Regular", 10),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            justify=tk.LEFT
+        )
+        details_label.pack(pady=5)
+        
+        # Select button
+        select_btn = tk.Button(
+            container,
+            text="Select",
+            bg=ACCENT_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=0,
+            activebackground=SECONDARY_COLOR,
+            activeforeground=TEXT_COLOR,
+            command=lambda p=param_size: self.saveModelSelection(self.finalSelection[0], model_version, p)
+        )
+        select_btn.pack(pady=10)
+        
+        # Add hover effects
+        def on_enter(e, btn=select_btn):
+            btn.config(bg=SECONDARY_COLOR)
+        
+        def on_leave(e, btn=select_btn):
+            btn.config(bg=ACCENT_COLOR)
+        
+        select_btn.bind("<Enter>", on_enter)
+        select_btn.bind("<Leave>", on_leave)
+        
+        return container
+
+    def saveModelSelection(self, model_family, version, param_size):
+        """
+        Save the selected model configuration to the config file
+        
+        Args:
+            model_family: Model family (e.g., "llama", "qwen")
+            version: Model version (e.g., "2.0", "3.1")
+            param_size: Parameter size (e.g., "7b", "13b")
+        """
+        try:
+            # Format the model string as expected by Ollama
+            # Ollama model formats follow patterns like: llama3.1, llama3.1:8b, gemma3:27b, qwen:72b, phi4-mini
+            
+            # First normalize the version (remove decimal if it's .0)
+            if version.endswith(".0"):
+                version = version[:-2]
+                
+            # Format based on model family conventions
+            if model_family == "mistral":
+                # Special case for mistral which doesn't use version number
+                if param_size.lower() == "default" or not param_size:
+                    model_string = f"{model_family}"
+                else:
+                    model_string = f"{model_family}:{param_size.lower()}"
+            elif model_family == "llama":
+                # Llama uses format like llama3.1 or llama3.1:8b
+                if param_size.lower() == "default" or not param_size:
+                    model_string = f"{model_family}{version}"
+                else:
+                    model_string = f"{model_family}{version}:{param_size.lower()}"
+            elif model_family in ["gemma", "qwen", "mistral", "phi"]:
+                # Most models use format like gemma3:27b or phi4-mini
+                if param_size.lower() == "default" or not param_size:
+                    model_string = f"{model_family}{version}"
+                else:
+                    # Handle special cases like phi4-mini
+                    if param_size.lower() == "mini":
+                        model_string = f"{model_family}{version}-{param_size.lower()}"
+                    else:
+                        model_string = f"{model_family}{version}:{param_size.lower()}"
+            else:
+                # Default format for other models
+                if param_size.lower() == "default" or not param_size:
+                    model_string = f"{model_family}{version}"
+                else:
+                    model_string = f"{model_family}{version}:{param_size.lower()}"
+            
+            # Load existing config
+            config_data = {}
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r') as f:
+                    config_data = json.load(f)
+            
+            # Update model version
+            config_data['model_version'] = model_string
+            
+            # Save config
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(config_data, f)
+            
+            # Show success message
+            self.status_var.set(f"Model {model_string} saved to configuration!")
+            messagebox.showinfo("Success", f"Selected model: {model_string}")
+            
+            # Close the window or navigate to another screen
+            self.destroy()
+            
+        except Exception as e:
+            self.status_var.set(f"Error saving model selection: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save model selection: {str(e)}")
+            
+    def manualModel(self):
+        """
+        Display the initial model family selection screen with model cards
+        """
+        self.title('pyTracker Model Selection')
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        self.header_frame = tk.Frame(self, bg=PRIMARY_COLOR, height=70)
+        self.header_frame.pack(fill="x")
+        self.header_frame.pack_propagate(False)
+        
+        header_font = Font(family="Inter Regular", size=16, weight="bold")
+        tk.Label(
+            self.header_frame, 
+            text="pyTracker Model Selection", 
+            font=header_font, 
+            bg=PRIMARY_COLOR, 
+            fg=TEXT_COLOR
+        ).pack(pady=20)
+        
+        self.main_frame = tk.Frame(self, bg=BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Instructions label
+        tk.Label(
+            self.main_frame,
+            text="Select an LLM model to use with pyTracker:",
+            font=("Inter Regular", 12),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR
+        ).pack(pady=(0, 10))
+        
+        # Frame for model cards
+        models_frame = tk.Frame(self.main_frame, bg=BG_COLOR)
+        models_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Define model families
+        models = [
+            {"name": "Qwen", "image": "public/logos/qwen-color.png", "id": "qwen"},
+            {"name": "Llama", "image": "public/logos/llama-color.png", "id": "llama"},
+            {"name": "Mistral", "image": "public/logos/mistral-color.png", "id": "mistral"},
+            {"name": "Gemma", "image": "public/logos/gemma-color.png", "id": "gemma"},
+            {"name": "Phi", "image": "public/logos/phi-color.png", "id": "phi"},
+            {"name": "Llava", "image": "public/logos/llava-color.png", "id": "llava"}
+        ]
+        
+        # Calculate columns - use 3 columns for better visibility
+        cols = min(4, len(models))
+        
+        # Create a grid of model buttons
+        for i, model in enumerate(models):
+            # Calculate grid position
+            row = i // cols
+            col = i % cols
+            
+            # Create container frame with FIXED size
+            container = tk.Frame(
+                models_frame,
+                bg=BG_COLOR,
+                width=100,
+                height=100,
+                bd=0
+            )
+            container.grid(row=row*2, column=col, padx=15, pady=10)
+            container.grid_propagate(False)
+            
+            # Create a canvas with rounded corners for the border
+            canvas = tk.Canvas(
+                container,
+                bg=BG_COLOR,
+                highlightthickness=0,
+                width=100,
+                height=100
+            )
+            canvas.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Draw rounded rectangle for border
+            border_id = canvas.create_rounded_rectangle(
+                10, 10, 90, 90,  # Coordinates
+                radius=10,       # Radius for rounded corners
+                fill=BG_COLOR,
+                outline=PRIMARY_COLOR,
+                width=2
+            )
+            
+            # Load image
+            try:
+                img = Image.open(model["image"])
+                img = img.resize((70, 70), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                
+                # Create larger image for hover state
+                hover_img = Image.open(model["image"])
+                hover_img = hover_img.resize((80, 80), Image.LANCZOS)
+                hover_photo = ImageTk.PhotoImage(hover_img)
+                
+                # Add image to canvas
+                image_id = canvas.create_image(50, 50, image=photo, anchor="center")
+                canvas.image = photo  # Keep reference
+                canvas.hover_image = hover_photo  # Keep reference
+                
+                # Add hover effects without moving other elements
+                def on_enter(e, canv=canvas, h_img=hover_photo, b_id=border_id):
+                    canv.itemconfig(b_id, outline=ACCENT_COLOR, width=3)
+                    canv.itemconfig(canv.find_withtag("current")[0], image=h_img)
+                    
+                def on_leave(e, canv=canvas, o_img=photo, b_id=border_id):
+                    canv.itemconfig(b_id, outline=PRIMARY_COLOR, width=2)
+                    canv.itemconfig(canv.find_withtag("current")[0], image=o_img)
+                    
+                canvas.tag_bind(image_id, "<Enter>", on_enter)
+                canvas.tag_bind(image_id, "<Leave>", on_leave)
+                canvas.tag_bind(image_id, "<Button-1>", 
+                            lambda e, m=model["id"]: self.gotoModelVersionSelection(m))
+                
+                # Add label
+                tk.Label(
+                    models_frame,
+                    text=model["name"],
+                    fg=TEXT_COLOR,
+                    bg=BG_COLOR,
+                    font=("Inter Regular", 11)
+                ).grid(row=row*2+1, column=col)
+                
+            except Exception as e:
+                print(f"Error loading image for {model['name']}: {e}")
+        
+        # Add back button to return to previous screen
+        back_button = tk.Button(
+            self.main_frame,
+            text="← Back",
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            relief="flat",
+            borderwidth=1,
+            command=self.getModel
+        )
+        back_button.pack(side="bottom", pady=10)
+        
+        # Status message at the bottom
+        self.status_var = tk.StringVar()
+        self.status_var.set("Select a model to continue")
+        
+        self.status_label = ttk.Label(
+            self, 
+            textvariable=self.status_var,
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+        self.status_label.pack(side="bottom", pady=10)
 
 
 def get_credentials():
-    with open(CONFIG_FILE, 'r') as f:
-        config = json.load(f)
+    """
+    Get Google API credentials, handling expired tokens gracefully.
+    Automatically deletes invalid tokens and creates new ones when needed.
+    
+    Returns:
+        Google API credentials object
+    """
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        return None
 
-    OUTPUT_DIR = config['output_dir']
-    creds = None
     # The file token.json stores the user's access and refresh tokens
     token_path = os.path.join(CONFIG_DIR, 'token.json')
+    creds = None
+    token_valid = True
     
     # Check if token.json exists with valid credentials
     if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_info(
-            json.load(open(token_path)), SCOPES)
+        try:
+            # Try to load existing credentials
+            creds = Credentials.from_authorized_user_info(
+                json.load(open(token_path)), SCOPES)
+                
+            # Test if credentials are valid by making a small request
+            if creds.token_state == TokenState.FRESH:
+                try:
+                    # Quick test to see if token actually works
+                    service = build('sheets', 'v4', credentials=creds)
+                    service.spreadsheets().get(spreadsheetId="dummy").execute()
+                except Exception:
+                    # If test request fails, mark token as invalid
+                    print("Token appears to be invalid despite being marked as valid")
+                    token_valid = False
+                    
+        except Exception as e:
+            # If there's any error loading or using the token
+            print(f"Error with existing token: {e}")
+            token_valid = False
     
-    # If there are no valid credentials, let the user log in
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                os.path.join(CONFIG_DIR, 'credentials.json'), SCOPES)
-            creds = flow.run_local_server(port=0)
+    # If there's no valid token, we need new credentials
+    if not creds or not token_valid:
+        # If token exists but is invalid, try to refresh it
+        if creds and creds.expired and creds.refresh_token and token_valid:
+            try:
+                creds.refresh(Request())
+                print("Successfully refreshed expired token")
+            except Exception as e:
+                print(f"Failed to refresh token: {e}")
+                token_valid = False
+                creds = None  # Clear the invalid credentials
         
-        # Save the credentials for the next run
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
+        # If token couldn't be refreshed or wasn't valid to begin with, create a new one
+        if not token_valid or not creds:
+            # First remove the invalid token if it exists
+            if os.path.exists(token_path):
+                try:
+                    os.remove(token_path)
+                    print(f"Removed invalid token file: {token_path}")
+                except Exception as e:
+                    print(f"Error removing invalid token file: {e}")
+            
+            # Now get new credentials via OAuth flow
+            try:
+                credentials_path = os.path.join(CONFIG_DIR, 'credentials.json')
+                if not os.path.exists(credentials_path):
+                    print(f"Error: Credentials file not found at {credentials_path}")
+                    return None
+                    
+                flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+                creds = flow.run_local_server(port=0)
+                
+                # Save the new credentials
+                with open(token_path, 'w') as token:
+                    token.write(creds.to_json())
+                print("Generated and saved new token")
+            except Exception as e:
+                print(f"Error generating new token: {e}")
+                return None
     
     return creds
 
@@ -520,10 +1303,10 @@ def initialize_sheets(service, spreadsheet_id, gc_client):
     # Step 2: Set up headers in Applications sheet if needed
     applications_sheet = spreadsheet.worksheet('Applications')
     if not applications_sheet.cell(1, 1).value:
-        applications_sheet.update('A1:F1', [['Status', 'Company', 'Date Applied', 'Last Updated','Link','Role']])
+        applications_sheet.update('A1:H1', [['Status', 'Company', 'Date Applied', 'Last Updated', 'Link', 'Role', 'Company ID', 'Job ID']])
         applications_sheet.freeze(rows=1)
-        applications_sheet.format('A1:F1', {'textFormat': {'bold': True}})
-        applications_sheet.format('A1:F1', {"backgroundColor": {"red": 0.961, "green": 0.961, "blue": 0.961}})
+        applications_sheet.format('A1:H1', {'textFormat': {'bold': True}})
+        applications_sheet.format('A1:H1', {"backgroundColor": {"red": 0.961, "green": 0.961, "blue": 0.961}})
         print("Initialized headers in Applications sheet")
 
     backend_sheet = spreadsheet.worksheet('Backend')
@@ -566,8 +1349,30 @@ def remove_default_sheets(service, spreadsheet_id, gc_client):
     return sheets_removed
 
 def main():
-    pyglet.font.add_file('public/fonts/Inter-VariableFont_opsz,wght.ttf')
-    config = loadConfig()
+    try:
+        # Initialize fonts
+        pyglet.font.add_file('public/fonts/Inter-VariableFont_opsz,wght.ttf')
+    except Exception as e:
+        print(f"Warning: Could not load font: {e}")
+    
+    # Create and run the setup wizard
+    app = SetupWizard()
+    
+    # Set theme for ttk widgets
+    style = ttk.Style(app)
+    try:
+        if os.name == 'nt':  # Windows
+            style.theme_use('vista')
+        else:  # macOS or Linux
+            style.theme_use('clam')
+    except tk.TclError:
+        # Fall back to a default theme if the specified one isn't available
+        available_themes = style.theme_names()
+        if 'clam' in available_themes:
+            style.theme_use('clam')
+    
+    # Run the application
+    app.mainloop()
 
 
 if __name__ == "__main__":

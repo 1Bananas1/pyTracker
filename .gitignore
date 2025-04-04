@@ -2,3 +2,6 @@
 config/*
 token.json
 output.log
+!config/.gitignore
+fix-pip.py
+src/utils/__pycache__
