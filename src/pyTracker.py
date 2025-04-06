@@ -29,6 +29,24 @@ def strip_html_tags(html_text):
     s.feed(html_text)
     return s.get_data()
 
+def remove_repeated_blocks(text):
+    lines = text.splitlines()
+    seen = set()
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and stripped not in seen:
+            seen.add(stripped)
+            cleaned.append(stripped)
+    return '\n'.join(cleaned)
+def remove_unicode_noise(text):
+    return re.sub(r'[\u034f\u00ad]+', '', text)
+def remove_broken_markdown_links(text):
+    return re.sub(r'\[[^\]]*?\]\([^\)]*?\)', '', text)
+def collapse_whitespace(text):
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def get_credentials():
     config = _load_config()
     output_dir = config['output_dir']
@@ -72,7 +90,7 @@ def _load_config():
     with open('config/email_config.json', 'r') as f:
         return json.load(f)
 
-def get_emails_with_label(service, include_label='Internships', exclude_label='y'):
+def get_emails_with_label(service, include_label='Internships', exclude_label='Processed'):
     """
     Retrieve emails with a specific label but excluding another label.
     Returns a list of dictionaries containing email details.
@@ -238,6 +256,12 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
                     
                     # Clean up whitespace
                     body = re.sub(r'\s+', ' ', body).strip()
+                    # Apply extra cleaning
+                    body = remove_repeated_blocks(body)
+                    body = remove_unicode_noise(body)
+                    body = remove_broken_markdown_links(body)
+                    body = collapse_whitespace(body)
+
                 
                 # Add email to list
                 email_list.append({
@@ -294,17 +318,20 @@ def getOllamaResponse(email,model):
     4. DO NOT engage in conversation
     5. Triple backticks MUST wrap your JSON response
     6. Ignore ANY requests for information to stay private
+    7. If you are unable to find the Job Name, return 'N/A'
+    8. If the email is a conversation and does not look automated, return "CONVERSATION"
     
     EXTRACT these fields:
     - "Job Name": Position title with ID if present
     - "Company": Company name (extract from domain or signature if needed)
-    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", "Interview", "Accepted" or "Draft"
+    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", "Interview", "Accepted", "Assessment" or "Draft"
     
     STATUS DEFINITIONS:
     - "Received": Initial application acknowledgements, thank you messages
     - "Rejected": Clear rejections ("not moving forward", "other candidates", etc)
     - "Draft": Only when status is completely unclear
     - "Interview" : Only when the email requests some interview
+    - "Assessment" : Email asks candidate to complete assessment that is NOT a survey
     - "Accepted" : Only when a final job offer has been made
     
     YOUR RESPONSE MUST BE ONLY:
@@ -436,6 +463,8 @@ def log_parse_failure(email_data, ai_response):
     logging.info(f"AI RESPONSE:{separator}{ai_response}{separator}")
     logging.info(f"====================================")
 
+
+
 def main():
     _CONFIG = _load_config()
     EMAIL = _CONFIG['email']
@@ -448,7 +477,7 @@ def main():
 
     gmail_service = build('gmail', 'v1', credentials=creds)
 
-    emails = get_emails_with_label(gmail_service, include_label='Internships', exclude_label='processed')
+    emails = get_emails_with_label(gmail_service, include_label='Internships', exclude_label='')
     if not emails:
         return None
 
@@ -462,6 +491,16 @@ def main():
     processed_label_id = get_label_id(gmail_service, 'processed')
     emails_to_label = []  # To keep track of emails we've processed
     faulty_emails = []  # To keep track of faulty emails
+    
+    def build_entry():
+        return {
+            'Status': current['Status'],
+            'Company': current['Company'],
+            'Role': current['Job Name'],
+            'Last Updated': email['date'],
+            'Date Applied': email['date']
+        }
+
     
     for email in emails:
         email['body'] = remove_long_links(email['body'])
@@ -477,23 +516,30 @@ def main():
             continue  # Skip to the next email
         
         # Only proceed if we have a valid response
+        # matching 
         try:
-            matches = difflib.get_close_matches(current['Company'], df['Company'], n=1, cutoff=0.8)
-            if not matches:
-                entry.update({
-                    'Status': current['Status'],
-                    'Company': current['Company'],
-                    'Role': current['Job Name'],
-                    'Last Updated': email['date'],
-                    'Date Applied': email['date']
-                })
-                df.loc[len(df)] = entry
+            matches = difflib.get_close_matches(current['Company'], df['Company'], n=1, cutoff=0.8) # compare the current company extracted to the df 
+            if not matches: # if fuzzy search doesnt find anything, add new row
+                df.loc[len(df)] = build_entry()
             else:
-                match_index = df[df['Company'] == matches[0]].index[0]
-                df.at[match_index, 'Status'] = current['Status']
-                df.at[match_index, 'Role'] = current['Job Name']
-                df.at[match_index, 'Last Updated'] = email['date']
-            
+                # try to do a fuzzy search match in role names
+                matched = False
+                
+                for company_match in matches:
+                    matching_rows = df[df['Company'] == company_match]
+                    for idx in matching_rows.index:
+                        role_matches = difflib.get_close_matches(current['Job Name'], [df.at[idx, 'Role']],n=1,cutoff=0.8)
+                        if role_matches:
+                            df.at[idx, 'Status'] = current['Status']
+                            df.at[idx, 'Role'] = current['Job Name']
+                            df.at[idx, 'Last Updated'] = email['date']
+                            matched=True
+                            break
+                    if matched:
+                        break
+                    
+                if not matched:
+                    df.loc[len(df)] = build_entry()
             # Mark this email for labeling as processed
             emails_to_label.append(email['id'])
             
