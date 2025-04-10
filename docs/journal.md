@@ -1,5 +1,7 @@
 [filter1]: ## "Has word: intern OR recruit OR interview OR applying"
 [filter2]: ## "(intern OR recruit OR interview OR applying) -unsubscribe -newsletter -promotion -reward -sale -credit -loan -statement -billing -receipt -points -offers)"
+[prompt1]: ## "CRITICAL INSTRUCTIONS: 1. ONLY return a JSON object in the EXACT format shown below 2. DO NOT include any explanations or descriptions contd."
+    
 # Journal
 
 ### Entry 1
@@ -19,4 +21,9 @@
     - Despite prompting model to leave any email that the position isn't specified  as N/A it is still outputting other answers, might be that my prompt is becoming to long which is entirely likely.
 
 
-
+### Entry 2
+#### Apr 9, 2025
+##### Prompt Issues
+- My issue is that my [current prompt][prompt1] is doing too well of a job but is too long. I've been trying other prompts but the current prompt is just too accurate. I need it to be shorter.
+   - After doing some A/B testing I think I found a better prompt...
+- The next thing on my list is to improve the matching on companies by automatically removing certain words or characters like commas, LLC, etc.

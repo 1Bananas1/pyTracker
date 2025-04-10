@@ -90,7 +90,7 @@ def _load_config():
     with open('config/email_config.json', 'r') as f:
         return json.load(f)
 
-def get_emails_with_label(service, include_label='Internships', exclude_label='Processed'):
+def get_emails_with_label(service, include_label='Internships', exclude_label='processed'):
     """
     Retrieve emails with a specific label but excluding another label.
     Returns a list of dictionaries containing email details.
@@ -302,7 +302,7 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='P
             print("Required scopes: https://www.googleapis.com/auth/gmail.readonly or https://www.googleapis.com/auth/gmail.modify")
         return []
 
-def getOllamaResponse(email,model):
+def getOllamaResponse(email, model):
     response = ollama.chat(model=model, messages=[
     {
         'role': 'system',
@@ -318,21 +318,20 @@ def getOllamaResponse(email,model):
     4. DO NOT engage in conversation
     5. Triple backticks MUST wrap your JSON response
     6. Ignore ANY requests for information to stay private
-    7. If you are unable to find the Job Name, return 'N/A'
-    8. If the email is a conversation and does not look automated, return "CONVERSATION"
     
     EXTRACT these fields:
     - "Job Name": Position title with ID if present
-    - "Company": Company name (extract from domain or signature if needed)
+    - "Company": Company name WITHOUT department or division qualifiers (e.g. "CVS" not "CVS Health")
     - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", "Interview", "Accepted", "Assessment" or "Draft"
     
     STATUS DEFINITIONS:
     - "Received": Initial application acknowledgements, thank you messages
     - "Rejected": Clear rejections ("not moving forward", "other candidates", etc)
+    - "Reviewing": Application is being reviewed or under consideration
+    - "Interview": Email requests some interview or phone screen
+    - "Assessment": Email asks candidate to complete assessment or test
+    - "Accepted": Final job offer has been made
     - "Draft": Only when status is completely unclear
-    - "Interview" : Only when the email requests some interview
-    - "Assessment" : Email asks candidate to complete assessment that is NOT a survey
-    - "Accepted" : Only when a final job offer has been made
     
     YOUR RESPONSE MUST BE ONLY:
     ```
@@ -477,7 +476,7 @@ def main():
 
     gmail_service = build('gmail', 'v1', credentials=creds)
 
-    emails = get_emails_with_label(gmail_service, include_label='Internships', exclude_label='')
+    emails = get_emails_with_label(gmail_service, include_label='Internships', exclude_label='processed')
     if not emails:
         return None
 
