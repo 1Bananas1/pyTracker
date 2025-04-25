@@ -24,7 +24,7 @@ Make a Google [App Key](https://myaccount.google.com/u/1/apppasswords) to use du
 ### Initial setup
 
 ```bash
-  py -m venv .venv
+  python3.11 -m venv .venv  
   .venv\Scripts\activate
   pip install -r requirements.txt
 ```
@@ -40,5 +40,4 @@ Enter the required details, and press set up google sheet
 
 Download Ollama
 
-Warning: If the google sheet has trouble downloading, make a fake company with some random date. This bug will be fixed soon
     

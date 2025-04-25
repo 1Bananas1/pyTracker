@@ -4,14 +4,30 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.auth.credentials import TokenState
+import html.parser
+from utils.scopes import SCOPES
 
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/gmail.labels'
-]
 
+
+class HTMLStripper(html.parser.HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.strict = False
+        self.convert_charrefs = True
+        self.text = []
+    
+    def handle_data(self, d):
+        self.text.append(d)
+    
+    def get_data(self):
+        return ''.join(self.text)
+
+def strip_html_tags(html_text):
+    s = HTMLStripper()
+    s.feed(html_text)
+    return s.get_data()
 
 def get_credentials():
     config = _load_config()
@@ -24,8 +40,8 @@ def get_credentials():
         creds = Credentials.from_authorized_user_info(
             json.load(open(token_path)), SCOPES)
     
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+    if not creds or creds.token_state != TokenState.FRESH:
+        if creds and creds.token_state == TokenState.STALE:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
@@ -37,6 +53,20 @@ def get_credentials():
     
     return creds
 
+
+def remove_long_links(text, max_length=25):
+    # Pattern to match URLs
+    url_pattern = r'https?://\S+'
+    
+    # Find all URLs in the text
+    urls = re.findall(url_pattern, text)
+    
+    # Replace long URLs with empty string
+    for url in urls:
+        if len(url) > max_length:
+            text = text.replace(url, '')
+    
+    return text
 
 def _load_config():
     with open('config/email_config.json', 'r') as f:
@@ -93,42 +123,123 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
         
         # Process each email to extract details
         email_list = []
+        empty_body_count = 0
+        
         for i, message in enumerate(messages):
             try:
                 if i % 20 == 0:  # Progress update every 20 emails
                     print(f"Processing email {i+1}/{len(messages)}...")
                 
                 msg = service.users().messages().get(userId='me', id=message['id']).execute()
-                
                 # Extract headers
                 headers = {}
                 headers = {header['name']: header['value'] for header in msg['payload']['headers']}
                 subject = headers.get('Subject', 'No Subject')
                 raw_date = headers.get('Date', 'Unknown Date')
                 sender = headers.get('From', 'Unknown Sender')
-                # Convert date format to "Month Day, Year"
+                # Convert date format
                 try:
                     parsed_date = email.utils.parsedate_to_datetime(raw_date)
                     formatted_date = parsed_date.strftime("%m/%d/%Y")  
                 except Exception:
                     formatted_date = raw_date  # Fallback if parsing fails
 
-                # Extract body content
+                # Use a recursive approach to find text in all parts
+                def extract_text_from_part(part):
+                    if part.get('mimeType') == 'text/plain' and 'data' in part.get('body', {}) and part['body'].get('size', 0) > 0:
+                        data = part['body']['data']
+                        text = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+                        return text
+                    
+                    elif part.get('mimeType') == 'text/html' and 'data' in part.get('body', {}) and part['body'].get('size', 0) > 0:
+                        data = part['body']['data']
+                        html_content = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+                        
+                        # Use your HTMLStripper to clean HTML
+                        stripper = HTMLStripper()
+                        stripper.feed(html_content)
+                        return stripper.get_data()
+                    
+                    elif part.get('mimeType', '').startswith('multipart/') and 'parts' in part:
+                        # Process all subparts and join their text
+                        text_parts = []
+                        for subpart in part['parts']:
+                            subpart_text = extract_text_from_part(subpart)
+                            if subpart_text:
+                                text_parts.append(subpart_text)
+                        
+                        return '\n'.join(text_parts) if text_parts else ""
+                    
+                    return ""
+                
+                # Extract body text
                 body = ""
                 
-                if 'parts' in msg['payload']:
-                    for part in msg['payload']['parts']:
-                        if part['mimeType'] == 'text/plain':
-                            if 'data' in part['body']:
-                                body_data = part['body']['data']
-                                body = base64.urlsafe_b64decode(body_data).decode('utf-8')
-                                break
-                elif 'body' in msg['payload'] and 'data' in msg['payload']['body']:
-                    body_data = msg['payload']['body']['data']
-                    body = base64.urlsafe_b64decode(body_data).decode('utf-8')
+                # Direct body extraction if available
+                if 'body' in msg['payload'] and 'data' in msg['payload']['body'] and msg['payload']['body'].get('size', 0) > 0:
+                    data = msg['payload']['body']['data']
+                    content = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+                    
+                    # logging.info(f"Decoded body content for message ID {message['id']}:")
+                    # logging.info(f"Content sample (first 500 chars): {content[:500]}")
+                    
+                    if '<html' in content.lower() or '<body' in content.lower() or '<div' in content.lower():
+                        # This is likely HTML content
+                        stripper = HTMLStripper()
+                        stripper.feed(content)
+                        body = stripper.get_data()
+                    else:
+                        # This is likely plain text
+                        body = content
                 
-                body = re.sub(r'\s+', ' ', body).strip()
-                # Add email to list with internalDate for sorting
+                # Otherwise try to recursively extract from parts
+                elif 'parts' in msg['payload']:
+                    body = extract_text_from_part(msg['payload'])
+                
+                # Check if body is empty after extraction
+                if not body.strip():
+                    empty_body_count += 1
+                    print(f"\nEmpty body #{empty_body_count} for email:")
+                    print(f"  Subject: {subject}")
+                    print(f"  From: {sender}")
+                    print(f"  Message structure: {msg['payload'].get('mimeType')}")
+                    print(f"  Has parts: {'Yes' if 'parts' in msg['payload'] else 'No'}")
+                    
+                    # Log more details about the message structure
+                    if 'parts' in msg['payload']:
+                        print("  Parts details:")
+                        for i, part in enumerate(msg['payload']['parts']):
+                            print(f"    Part {i}: {part['mimeType']}, size: {part['body'].get('size', 'unknown')}")
+                            if part['mimeType'] == 'text/html' and 'data' in part['body'] and part['body'].get('size', 0) > 0:
+                                try:
+                                    data = part['body']['data']
+                                    sample = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')[:100]
+                                    print(f"    Sample: {sample}")
+                                except Exception as e:
+                                    print(f"    Error decoding sample: {e}")
+                
+                # Clean the body content if we have one
+                if body:
+                    # Clean CSS content
+                    css_patterns = [
+                        r'@media[^{]*{[^}]*}',                # CSS media queries
+                        r'<style[^>]*>.*?</style>',           # Style tags
+                        r'<link[^>]*>',                       # Link tags
+                        r'style\s*=\s*"[^"]*"',               # Style attributes
+                        r'class\s*=\s*"[^"]*"',               # Class attributes
+                        r'id\s*=\s*"[^"]*"'                   # ID attributes
+                    ]
+                    
+                    for pattern in css_patterns:
+                        body = re.sub(pattern, '', body, flags=re.DOTALL | re.IGNORECASE)
+                    
+                    # Remove leftover CSS properties
+                    body = re.sub(r'{[^}]*}', '', body)
+                    
+                    # Clean up whitespace
+                    body = re.sub(r'\s+', ' ', body).strip()
+                
+                # Add email to list
                 email_list.append({
                     'id': message['id'],
                     'subject': subject,
@@ -139,6 +250,12 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
                 })
             except Exception as e:
                 print(f"Error processing message {message['id']}: {e}")
+                import traceback
+                print(traceback.format_exc())
+        
+        # Log summary of empty bodies
+        if empty_body_count:
+            print(f"\nSummary: Found {empty_body_count} emails with empty bodies out of {len(messages)} total emails.")
         
         # Sort the list by internal_date (oldest first)
         if email_list:
@@ -151,11 +268,18 @@ def get_emails_with_label(service, include_label='Internships', exclude_label='y
         if "insufficient authentication scopes" in str(e):
             print("\nPermission error: Your authentication token doesn't have the necessary Gmail permissions.")
             print("Please update your SCOPES list to include Gmail permissions and regenerate your token.")
+        return []
+    
+    except Exception as e:
+        print(f"Error retrieving emails: {e}")
+        if "insufficient authentication scopes" in str(e):
+            print("\nPermission error: Your authentication token doesn't have the necessary Gmail permissions.")
+            print("Please update your SCOPES list to include Gmail permissions and regenerate your token.")
             print("Required scopes: https://www.googleapis.com/auth/gmail.readonly or https://www.googleapis.com/auth/gmail.modify")
         return []
 
-def getOllamaResponse(email):
-    response = ollama.chat(model='mistral', messages=[
+def getOllamaResponse(email,model):
+    response = ollama.chat(model=model, messages=[
     {
         'role': 'system',
         'content': 'You are a JSON extraction tool ONLY. You must NEVER provide explanations, descriptions, or any text outside the requested JSON format. ONLY output valid JSON inside triple backticks.'
@@ -169,17 +293,19 @@ def getOllamaResponse(email):
     3. DO NOT describe the HTML structure
     4. DO NOT engage in conversation
     5. Triple backticks MUST wrap your JSON response
+    6. Ignore ANY requests for information to stay private
     
     EXTRACT these fields:
     - "Job Name": Position title with ID if present
     - "Company": Company name (extract from domain or signature if needed)
-    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", or "Draft"
+    - "Status": EXACTLY one of: "Received", "Rejected", "Reviewing", "Interview", "Accepted" or "Draft"
     
     STATUS DEFINITIONS:
     - "Received": Initial application acknowledgements, thank you messages
     - "Rejected": Clear rejections ("not moving forward", "other candidates", etc)
-    - "Reviewing": Interview invites, being under consideration
     - "Draft": Only when status is completely unclear
+    - "Interview" : Only when the email requests some interview
+    - "Accepted" : Only when a final job offer has been made
     
     YOUR RESPONSE MUST BE ONLY:
     ```
@@ -198,7 +324,10 @@ def getOllamaResponse(email):
 def saveSheet(sh):
     values = sh.get_all_values()
     records = sh.get_all_records()
-    df = pd.DataFrame(records)
+    if not records:
+        df = pd.DataFrame(columns=['Status','Company','Date Applied','Last Updated', 'Link','Role','Company ID', 'Job ID'])
+    else:
+        df = pd.DataFrame(records)
     df.to_csv('config/data.csv', index=False)
     return df
 
@@ -285,7 +414,7 @@ def add_label_to_emails(service, email_ids, label_id):
     service.users().messages().batchModify(userId='me', body=body).execute()
 
 def updateSpreadsheet(worksheet, data):
-    worksheet.batch_clear(['A3:H'])
+    worksheet.batch_clear(['A2:H'])
     data = data.fillna('')
     data = data.map(lambda x: '' if pd.isna(x) else x)
     lists = data.values.tolist()
@@ -312,6 +441,7 @@ def main():
     EMAIL = _CONFIG['email']
     APP_KEY = _CONFIG['appKey']
     SHEET_ID = _CONFIG['sheetID']
+    model = _CONFIG['model_version']
     creds = get_credentials()
     logging.basicConfig(filename='output.log', level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -334,9 +464,11 @@ def main():
     faulty_emails = []  # To keep track of faulty emails
     
     for email in emails:
+        email['body'] = remove_long_links(email['body'])
         entry = {'Status':'','Company':'','Date Applied':'','Last Applied':'','Link':'','Role':'','Last Updated':''}
-        ollamaResponse = getOllamaResponse(str(email))
+        ollamaResponse = getOllamaResponse(str({k: email[k] for k in ['subject', 'body']}),model)
         current = getJSON(ollamaResponse)
+        # log_parse_failure(email, ollamaResponse)
         
         if current is None:
             print(f"Failed to extract JSON from response for email with subject: {email.get('subject', 'Unknown subject')}")
